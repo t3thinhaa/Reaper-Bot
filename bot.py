@@ -42,5 +42,18 @@ class ReaperBot(commands.Bot):
 
 
 bot = ReaperBot()
+from flask import Flask
+import threading
 
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=10000)
+
+# Chạy server web ở một luồng riêng biệt để không làm kẹt bot
+threading.Thread(target=run).start()
 bot.run(TOKEN)
