@@ -1,0 +1,188 @@
+[
+  {
+    "title": "🍗 Thần Bài Shotgun",
+    "description": "Cả team chỉ được phép sử dụng các loại súng thuộc dòng **Shotgun (SG)** và **Súng lục** xuyên suốt trận đấu cho đến khi lọt vào Top 10.",
+    "difficulty": "🟢 Dễ",
+    "reward": 50
+  },
+  {
+    "title": "🎯 Thợ Săn Tầm Xa",
+    "description": "Không được sấy! Chỉ được dùng súng bắn tỉa nhắp từng viên (**SR hoặc DMR**) làm vũ khí chính cho mọi cự ly.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 100
+  },
+  {
+    "title": "🏹 Thợ Săn Nguyên Thủy",
+    "description": "Vũ khí chính bắt buộc là **Cung tên (Crossbow)** kết hợp với vũ khí cận chiến (Chảo, Xà beng...).",
+    "difficulty": "💀 Ám Mộng",
+    "reward": 400
+  },
+  {
+    "title": "🕊️ Đại Sứ Hòa Bình",
+    "description": "Lọt vào **Top 5** của trận đấu mà tổng lượng sát thương (Damage) gây ra của bản thân bạn bằng **0**.",
+    "difficulty": "🔴 Khó",
+    "reward": 250
+  },
+  {
+    "title": "📦 Kẻ Cướp Xác",
+    "description": "Nhảy dù xuống cấm loot đồ trong nhà! Chỉ dùng tay không đấm chết tên địch đầu tiên và xài toàn bộ đồ của hắn.",
+    "difficulty": "🔴 Khó",
+    "reward": 300
+  },
+  {
+    "title": "🧛 Ma Cà Rồng",
+    "description": "Không được dùng Bình máu nhỏ. Chỉ được hồi máu bằng cách **cướp nước tăng lực hoặc thuốc** từ hòm xác kẻ địch.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 150
+  },
+  {
+    "title": "🚗 Quái Xế Đường Đua",
+    "description": "Hạ gục ít nhất 2 kẻ địch bằng cách **đâm xe** trong trận đấu.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 120
+  },
+  {
+    "title": "🏃 Vận Động Viên Đi Bộ",
+    "description": "Tuyệt đối không được leo lên xe cộ. Đi bộ xuyên bản đồ chạy bo từ đầu trận đến cuối trận.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 150
+  },
+  {
+    "title": "🎒 Kẻ Khắc Khổ",
+    "description": "Chỉ được dùng **Balo level 1** xuyên suốt trận đấu. Quản lý tài nguyên thật chặt chẽ!",
+    "difficulty": "🟢 Dễ",
+    "reward": 60
+  },
+  {
+    "title": "👁️ Thần Chết Mù Quáng",
+    "description": "Bắt buộc tháo toàn bộ Kính ngắm (Scopes/Red dot/Holo). Chỉ bắn bằng tâm cơ bản (Iron Sight) hoặc sấy Hip-fire.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 120
+  },
+  {
+    "title": "🦅 Thợ Săn Thính",
+    "description": "Cả team bắt buộc phải đi săn và nhặt ít nhất **3 hòm Thính (Airdrop)** trong một trận đấu.",
+    "difficulty": "🔴 Khó",
+    "reward": 200
+  },
+  {
+    "title": "🐸 Kẻ Săn Đêm",
+    "description": "Kể từ vòng bo số 4 trở đi, bạn chỉ được phép di chuyển bằng cách **bò hoặc trườn (Prone)**.",
+    "difficulty": "🔴 Khó",
+    "reward": 220
+  },
+  {
+    "title": "⛰️ Thượng Sơn Định Hải",
+    "description": "Vừa vào trận phải di chuyển thẳng lên đỉnh ngọn núi cao nhất trên bản đồ và cố thủ ở đó ít nhất 5 phút.",
+    "difficulty": "🟢 Dễ",
+    "reward": 70
+  },
+  {
+    "title": "👑 Bảo Vệ VIP",
+    "description": "Chọn 1 đồng đội làm VIP (Không mặc Giáp/Mũ). Cả team phải hộ tống VIP đó sống sót vào đến **Top 10**.",
+    "difficulty": "🔴 Khó",
+    "reward": 200
+  },
+  {
+    "title": "📢 Tổng Đài Viên",
+    "description": "Mỗi khi phát hiện địch hoặc chuẩn bị bắn, bạn bắt buộc phải **hét thật to tên súng** đang cầm lên Voice Chat.",
+    "difficulty": "🟢 Giải Trí",
+    "reward": 50
+  },
+  {
+    "title": "🎭 Cặp Đôi Đồng Điệu",
+    "description": "Bạn và 1 người đồng đội phải mặc đồ giống hệt nhau, nhặt súng giống hệt nhau và đi cách nhau không quá 10m.",
+    "difficulty": "🟢 Giải Trí",
+    "reward": 60
+  },
+  {
+    "title": "💣 Tiệc Lựu Đạn",
+    "description": "Cấm bắn! Chỉ được hạ gục hoặc kết liễu kẻ địch bằng các loại bom: Lựu đạn nổ, Bom xăng hoặc C4.",
+    "difficulty": "🔴 Khó",
+    "reward": 250
+  },
+  {
+    "title": "🦾 Đấm Phát Chết Luôn",
+    "description": "Hạ gục thành công ít nhất 1 kẻ địch đang có súng bằng **vũ khí cận chiến** hoặc **nắm đấm**.",
+    "difficulty": "💀 Ám Mộng",
+    "reward": 400
+  },
+  {
+    "title": "🔫 Cao Bồi Miền Tây",
+    "description": "Chỉ sử dụng các vũ khí: **Win94, R1895, R45** hoặc **Sawed-off** trong suốt trận đấu.",
+    "difficulty": "🔴 Khó",
+    "reward": 250
+  },
+  {
+    "title": "💊 Con Nghiện Tăng Lực",
+    "description": "Lúc nào cây thanh lực (Boost bar) cũng phải đầy trên 50%. Nhìn thấy nước hoặc thuốc là phải cắn ngay lập tức!",
+    "difficulty": "🟢 Dễ",
+    "reward": 50
+  },
+  {
+    "title": "🛡️ Thần Giáp Nát",
+    "description": "Chỉ được phép mặc **Giáp 1 và Mũ 1** (hoặc đồ nát sắp hỏng). Không được nhặt đồ Level 2 hay 3.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 90
+  },
+  {
+    "title": "🥫 Kẻ Thu Gom",
+    "description": "Tích trữ ít nhất **15 quả bom các loại** (Nổ, Khói, Lửa, Choáng) trong balo khi vào đến vòng bo thứ 5.",
+    "difficulty": "🟢 Dễ",
+    "reward": 70
+  },
+  {
+    "title": "🚫 Không Sát Sinh",
+    "description": "Hỗ trợ đồng đội hết mình bằng cách gõ nốc (Knock) địch nhưng **không được phép trực tiếp kết liễu** mạng nào.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 100
+  },
+  {
+    "title": "🔥 Hỏa Thần Tái Thế",
+    "description": "Chỉ sử dụng **Bom Xăng (Molotov)** và súng có gắn **Đạn lửa (M249/O12 nếu có)** làm vũ khí gây sát thương chính.",
+    "difficulty": "🔴 Khó",
+    "reward": 200
+  },
+  {
+    "title": "🤫 Sát Thủ Thầm Lặng",
+    "description": "Tất cả súng sử dụng bắt buộc phải gắn **Giảm thanh (Suppressor)**. Nếu không có giảm thanh, cấm bắn!",
+    "difficulty": "🟢 Dễ",
+    "reward": 80
+  },
+  {
+    "title": "🚨 Kẻ Gây Hấn",
+    "description": "Bất cứ khi nào đi qua các khu nhà lớn, bắt buộc phải **bắn 3 viên chỉ thiên** để khiêu khích kẻ địch xung quanh.",
+    "difficulty": "🟢 Giải Trí",
+    "reward": 60
+  },
+  {
+    "title": "🥶 Thử Thách Trầm Cảm",
+    "description": "Không được sử dụng bất kỳ phụ kiện súng nào (Không tay cầm, không băng đạn mở rộng, không đuôi báng).",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 130
+  },
+  {
+    "title": "🛸 Nhảy Dù Sát Biên Giới",
+    "description": "Bắt buộc phải nhảy dù vào các khu vực nằm sát mép bản đồ (Gạch viền ngoài cùng) và chạy bo vào.",
+    "difficulty": "🟢 Dễ",
+    "reward": 60
+  },
+  {
+    "title": "🤿 Thủy Quái Chạy Bo",
+    "description": "Dành ít nhất 50% thời gian của 3 vòng bo đầu tiên để **bơi hoặc ẩn nấp dưới nước**.",
+    "difficulty": "🟢 Dễ",
+    "reward": 70
+  },
+  {
+    "title": "🍱 Shipper Tận Tụy",
+    "description": "Loot đầy 1 balo nhu yếu phẩm (Máu, đạn) rồi lái xe đi tìm team địch, bấm còi thả balo ra tặng họ rồi chạy.",
+    "difficulty": "🟢 Giải Trí",
+    "reward": 100
+  },
+  {
+    "title": "💀 Người Đi Xuyên Cái Chết",
+    "description": "Sống sót đi qua vùng **Oanh tạc (Red Zone / Black Zone)** bằng cách đứng im giữa đường mà không trốn vào nhà.",
+    "difficulty": "🟡 Trung Bình",
+    "reward": 120
+  }
+]

@@ -1,0 +1,31 @@
+🍗 Thần Bài Shotgun|Cả team chỉ được phép sử dụng các loại súng thuộc dòng **Shotgun (SG)** và **Súng lục** xuyên suốt trận đấu cho đến khi lọt vào Top 10.|🟢 Dễ|50
+🎯 Thợ Săn Tầm Xa|Không được sấy! Chỉ được dùng súng bắn tỉa nhấp từng viên (**SR hoặc DMR**) làm vũ khí chính cho mọi cự ly.|🟡 Trung Bình|100
+🏹 Thợ Săn Nguyên Thủy|Vũ khí chính bắt buộc là **Cung tên (Crossbow)** kết hợp với vũ khí cận chiến (Chảo, Xà beng...).|💀 Ám Mộng|400
+🕊️ Đại Sứ Hòa Bình|Lọt vào **Top 5** của trận đấu mà tổng lượng sát thương (Damage) gây ra của bản thân bạn bằng **0**.|🔴 Khó|250
+📦 Kẻ Cướp Xác|Nhảy dù xuống cấm loot đồ trong nhà! Chỉ dùng tay không đấm chết tên địch đầu tiên và xài toàn bộ đồ của hắn.|🔴 Khó|300
+🧛 Ma Cà Rồng|Không được dùng Bình máu nhỏ. Chỉ được hồi máu bằng cách **cướp nước tăng lực hoặc thuốc** từ hòm xác kẻ địch.|🟡 Trung Bình|150
+🚗 Quái Xế Đường Đua|Hạ gục ít nhất 2 kẻ địch bằng cách **đâm xe** trong trận đấu.|🟡 Trung Bình|120
+🏃 Vận Động Viên Đi Bộ|Tuyệt đối không được leo lên xe cộ. Đi bộ xuyên bản đồ chạy bo từ đầu trận đến cuối trận.|🟡 Trung Bình|150
+🎒 Kẻ Khắc Khổ|Chỉ được dùng **Balo level 1** xuyên suốt trận đấu. Quản lý tài nguyên thật chặt chẽ!|🟢 Dễ|60
+👁️ Thần Chết Mù Quáng|Bắt buộc tháo toàn bộ Kính ngắm (Scopes/Red dot/Holo). Chỉ bắn bằng tâm cơ bản (Iron Sight) hoặc sấy Hip-fire.|🟡 Trung Bình|120
+🦅 Thợ Săn Thính|Cả team bắt buộc phải đi săn và nhặt ít nhất **3 hòm Thính (Airdrop)** trong một trận đấu.|🔴 Khó|200
+🐸 Kẻ Săn Đêm|Kể từ vòng bo số 4 trở đi, bạn chỉ được phép di chuyển bằng cách **bò hoặc trườn (Prone)**.|🔴 Khó|220
+⛰️ Thượng Sơn Định Hải|Vừa vào trận phải di chuyển thẳng lên đỉnh ngọn núi cao nhất trên bản đồ và cố thủ ở đó ít nhất 5 phút.|🟢 Dễ|70
+👑 Bảo Vệ VIP|Chọn 1 đồng đội làm VIP (Không mặc Giáp/Mũ). Cả team phải hộ tống VIP đó sống sót vào đến **Top 10**.|🔴 Khó|200
+📢 Tổng Đài Viên|Mỗi khi phát hiện địch hoặc chuẩn bị bắn, bạn bắt buộc phải **hét thật to tên súng** đang cầm lên Voice Chat.|🟢 Giải Trí|50
+🎭 Cặp Đôi Đồng Điệu|Bạn và 1 người đồng đội phải mặc đồ giống hệt nhau, nhặt súng giống hệt nhau và đi cách nhau không quá 10m.|🟢 Giải Trí|60
+💣 Tiệc Lựu Đạn|Cấm bắn! Chỉ được hạ gục hoặc kết liễu kẻ địch bằng các loại bom: Lựu đạn nổ, Bom xăng hoặc C4.|🔴 Khó|250
+🦾 Đấm Phát Chết Luôn|Hạ gục thành công ít nhất 1 kẻ địch đang có súng bằng **vũ khí cận chiến** hoặc **nắm đấm**.|💀 Ám Mộng|400
+🔫 Cao Bồi Miền Tây|Chỉ sử dụng các vũ khí: **Win94, R1895, R45** hoặc **Sawed-off** trong suốt trận đấu.|🔴 Khó|250
+💊 Con Nghiện Tăng Lực|Lúc nào cây thanh lực (Boost bar) cũng phải đầy trên 50%. Nhìn thấy nước hoặc thuốc là phải cắn ngay lập tức!|🟢 Dễ|50
+🛡️ Thần Giáp Nát|Chỉ được phép mặc **Giáp 1 và Mũ 1** (hoặc đồ nát sắp hỏng). Không được nhặt đồ Level 2 hay 3.|🟡 Trung Bình|90
+🥫 Kẻ Thu Gom|Tích trữ ít nhất **15 quả bom các loại** (Nổ, Khói, Lửa, Choáng) trong balo khi vào đến vòng bo thứ 5.|🟢 Dễ|70
+🚫 Không Sát Sinh|Hỗ trợ đồng đội hết mình bằng cách gõ nốc (Knock) địch nhưng **không được phép trực tiếp kết liễu** mạng nào.|🟡 Trung Bình|100
+🔥 Hỏa Thần Tái Thế|Chỉ sử dụng **Bom Xăng (Molotov)** và súng có gắn **Đạn lửa (M249/O12 nếu có)** làm vũ khí gây sát thương chính.|🔴 Khó|200
+🤫 Sát Thủ Thầm Lặng|Tất cả súng sử dụng bắt buộc phải gắn **Giảm thanh (Suppressor)**. Nếu không có giảm thanh, cấm bắn!|🟢 Dễ|80
+🚨 Kẻ Gây Hấn|Bất cứ khi nào đi qua các khu nhà lớn, bắt buộc phải **bắn 3 viên chỉ thiên** để khiêu khích kẻ địch xung quanh.|🟢 Giải Trí|60
+🥶 Thử Thách Trầm Cảm|Không được sử dụng bất kỳ phụ kiện súng nào (Không tay cầm, không băng đạn mở rộng, không đuôi báng).|🟡 Trung Bình|130
+🛸 Nhảy Dù Sát Biên Giới|Bắt buộc phải nhảy dù vào các khu vực nằm sát mép bản đồ (Gạch viền ngoài cùng) và chạy bo vào.|🟢 Dễ|60
+🤿 Thủy Quái Chạy Bo|Dành ít nhất 50% thời gian của 3 vòng bo đầu tiên để **bơi hoặc ẩn nấp dưới nước**.|🟢 Dễ|70
+🍱 Shipper Tận Tụy|Loot đầy 1 balo nhu yếu phẩm (Máu, đạn) rồi lái xe đi tìm team địch, bấm còi thả balo ra tặng họ rồi chạy.|🟢 Giải Trí|100
+💀 Người Đi Xuyên Cái Chết|Sống sót đi qua vùng **Oanh tạc (Red Zone / Black Zone)** bằng cách đứng im giữa đường mà không trốn vào nhà.|🟡 Trung Bình|120
