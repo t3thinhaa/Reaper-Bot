@@ -2,106 +2,115 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-def get_color_emoji(role_name: str) -> str:
+# Định nghĩa từ khóa cho 3 trường phái lớn
+EVIL_KEYWORDS = ["infernal", "sanguine", "catalism", "bloodrose", "crimson", "abyss", "void", "dark", "soul", "plague"]
+GOOD_KEYWORDS = ["celestial", "radiant", "auric", "solar", "dawn", "light", "ethereal", "crystal", "neonpink", "lightpink"]
+
+def get_reaper_faction(role_name: str) -> str:
+    """Phân loại role vào 3 nhóm hướng Ác, hướng Thiện hoặc Hướng lung tung."""
     name_lower = role_name.lower()
-    if "crimson" in name_lower or "infernal" in name_lower:
-        return "🔴"
-    elif "dark" in name_lower or "abyss" in name_lower:
-        return "⚫"
-    elif "phantom" in name_lower or "void" in name_lower or "arcane" in name_lower or "astral" in name_lower:
-        return "🟣"
-    elif "pink" in name_lower or "rose" in name_lower:
-        return "💗"
-    elif "soul" in name_lower or "crystal" in name_lower or "frost" in name_lower:
-        return "🔵"
-    elif "forest" in name_lower:
-        return "🟢"
-    elif "light" in name_lower or "celestial" in name_lower or "radiant" in name_lower:
-        return "🟡"
-    return "⚪"
+    if any(word in name_lower for word in EVIL_KEYWORDS):
+        return "EVIL"
+    if any(word in name_lower for word in GOOD_KEYWORDS):
+        return "GOOD"
+    return "NEUTRAL"
 
-# 1. Thêm custom_id cho Dropdown để làm Persistent View
-class ColorDropdown(discord.ui.Select):
-    def __init__(self, color_roles):
-        options = []
-        for role in color_roles:
-            emoji = get_color_emoji(role.name)
-            options.append(discord.SelectOption(
-                label=role.name, 
-                value=str(role.id),
-                description=f"Click để chọn màu {role.name}",
-                emoji=emoji
-            ))
 
+# 1. Khai báo Dropdown với custom_id bắt buộc để tồn tại vĩnh viễn
+class FactionColorSelect(discord.ui.Select):
+    def __init__(self, roles_chunk, placeholder_text, custom_id_key):
+        options = [
+            discord.SelectOption(label=role.name, value=str(role.id), description=f"Bấm để chọn màu {role.name}")
+            for role in roles_chunk[:25]
+        ]
         super().__init__(
-            placeholder="🎨 Chọn một màu Reaper cho tên của bạn...",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="persistent_color_dropdown" # Bắt buộc phải có ID cố định
+            placeholder=placeholder_text, 
+            min_values=1, 
+            max_values=1, 
+            options=options, 
+            custom_id=f"persistent_color_select:{custom_id_key}"
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # Đóng nhận tương tác ẩn ngay lập tức để tránh lỗi hiển thị
-        await interaction.response.defer(ephemeral=True)
-        
         role_id = int(self.values[0])
-        guild = interaction.guild
-        member = interaction.user
-        chosen_role = guild.get_role(role_id)
-
-        if not chosen_role:
-            await interaction.followup.send("❌ Không tìm thấy role màu này nữa!", ephemeral=True)
+        role = interaction.guild.get_role(role_id)
+        
+        if not role:
+            await interaction.response.send_message("Không tìm thấy role này trên server!", ephemeral=True)
             return
 
-        # Xóa các role màu Reaper cũ của thành viên
-        roles_to_remove = [role for role in member.roles if role.name.endswith("Reaper") and role.id != role_id]
-        if roles_to_remove:
-            await member.remove_roles(*roles_to_remove)
+        old_reaper_roles = [r for r in interaction.user.roles if r.name.lower().endswith('reaper')]
+        if old_reaper_roles:
+            await interaction.user.remove_roles(*old_reaper_roles)
 
-        # Thêm role màu mới
-        await member.add_roles(chosen_role)
+        await interaction.user.add_roles(role)
+        await interaction.response.send_message(f"✨ Bạn đã chọn màu hệ: **{role.name}** thành công!", ephemeral=True)
+
+
+# 2. View vĩnh cửu (Đặt timeout=None)
+class FactionColorView(discord.ui.View):
+    def __init__(self, guild_roles=None):
+        super().__init__(timeout=None)
+        if guild_roles is None:
+            return
+
+        evil_roles = []
+        good_roles = []
+        neutral_roles = []
         
-        # CHỈ biến mất thông báo này thôi (bằng cách dùng ephemeral=True)
-        await interaction.followup.send(f"🎉 Đã đổi màu tên của bạn sang **{chosen_role.name}** thành công!", ephemeral=True)
+        for role in guild_roles:
+            if role.name.lower().endswith('reaper') and not role.is_default():
+                faction = get_reaper_faction(role.name)
+                if faction == "EVIL":
+                    evil_roles.append(role)
+                elif faction == "GOOD":
+                    good_roles.append(role)
+                else:
+                    neutral_roles.append(role)
+                
+        evil_roles.sort(key=lambda r: r.name.lower())
+        good_roles.sort(key=lambda r: r.name.lower())
+        neutral_roles.sort(key=lambda r: r.name.lower())
+
+        if evil_roles:
+            self.add_item(FactionColorSelect(evil_roles, f"😈 Reaper Ác Wuỹ ({len(evil_roles)} màu tối/đỏ)...", "evil"))
+        if good_roles:
+            self.add_item(FactionColorSelect(good_roles, f"😇 Reaper Hướng Thiện ({len(good_roles)} màu sáng/vàng)...", "good"))
+        if neutral_roles:
+            self.add_item(FactionColorSelect(neutral_roles, f"🌀 Reaper Hướng Lung Tung ({len(neutral_roles)} màu nhạt)...", "neutral"))
 
 
-# 2. Định nghĩa View không có thời gian hết hạn (timeout=None)
-class ColorDropdownView(discord.ui.View):
-    def __init__(self, color_roles):
-        super().__init__(timeout=None) # timeout=None giúp menu không bao giờ biến mất
-        self.add_item(ColorDropdown(color_roles))
-
-
-class Colors(commands.Cog):
+# 3. Class quản lý lệnh thiết lập dạng Slash Command thuần túy
+class ColorsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # 3. Khi bot khởi động, nạp lại View này vào bộ nhớ để menu cũ từ hôm trước vẫn bấm được
-    @commands.Cog.listener()
-    async def on_ready(self):
-        # Chúng ta cần lấy danh sách role của một server (hoặc quét qua các server bot tham gia) để khôi phục View
-        # Ở đây ta tạo một View rỗng để đăng ký custom_id với Discord chống lỗi nút chết
-        self.bot.add_view(ColorDropdownView([]))
-        print("🟢 Đã nạp lại hệ thống Persistent Color Dropdown thành công!")
+    @app_commands.command(name="setup_roles", description="Tạo bảng chọn màu Embed vĩnh viễn trong kênh hiện tại")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setup_roles(self, interaction: discord.Interaction):
+        # 1. Trả lời ẩn cho Admin biết bot đang chạy (Tin nhắn này chỉ một mình Admin gõ lệnh nhìn thấy)
+        await interaction.response.send_message("🪄 Đang cấu hình và gửi bảng chọn màu độc lập...", ephemeral=True)
 
-    @app_commands.command(name="reaper_roles", description="Gửi bảng chọn màu cố định vào channel")
-    @app_commands.checks.has_permissions(manage_roles=True)
-    async def reaper_roles(self, interaction: discord.Interaction):
-        all_roles = sorted(interaction.guild.roles, key=lambda r: r.position, reverse=True)
-        color_roles = [role for role in all_roles if role.name.endswith("Reaper")]
+        # 2. Khởi tạo View dropdowns
+        view = FactionColorView(interaction.guild.roles)
 
-        if not color_roles:
-            await interaction.response.send_message("❌ Server chưa có role nào kết thúc bằng chữ 'Reaper'!", ephemeral=True)
-            return
-        
-        if len(color_roles) > 25:
-            color_roles = color_roles[:25]
+        # 3. Đọc file ảnh từ thư mục cục bộ của bot
+        file = discord.File("data/images/ReaperChooseColor.png", filename="ReaperChooseColor.png")
 
-        view = ColorDropdownView(color_roles)
-        # Gửi tin nhắn công khai vào kênh chat, menu này sẽ ở lại đây mãi mãi
-        await interaction.response.send_message("💡 **HỆ THỐNG TỰ ĐỔI MÀU TÊN**\nHãy chọn một màu sắc bạn yêu thích ở menu dưới đây để làm đẹp cho trang cá nhân của mình nhé:", view=view)
+        # 4. Thiết lập khung ảnh Embed
+        embed = discord.Embed(
+            title="Chọn đi Reaper",
+            description="Hãy lựa chọn con đường mà người sẽ cất bước trên dòng chảy của luân hồi.",
+            color=discord.Color.from_rgb(180, 26, 44)
+        )
+        embed.set_image(url="attachment://ReaperChooseColor.png")
+
+        # 5. [Mẹo Pro]: Gửi THẲNG vào kênh thông qua đối tượng channel (Không qua luân hồi interaction)
+        # Cách này giúp tin nhắn Embed đứng độc lập hoàn toàn, xóa sạch dòng chữ "đã trả lời..." phía trên!
+        await interaction.channel.send(embed=embed, view=view, file=file)
 
 
 async def setup(bot):
-    await bot.add_cog(Colors(bot))
+    cog = ColorsCog(bot)
+    await bot.add_cog(cog)
+    bot.add_view(FactionColorView())
