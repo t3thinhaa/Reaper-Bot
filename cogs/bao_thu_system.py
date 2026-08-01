@@ -131,13 +131,12 @@ class ActiveVoteView(discord.ui.View):
                         )
                         result_text += f"💥 {member.mention} gánh trọn `{max_votes}` phiếu phạt! Nhận `+1 Điểm Báo`.\n"
                         
-                        # 2. 🔥 THỰC THI PHÁN QUYẾT NGAY LẬP TỨC: Trao role Ngày & Sửa biệt danh
+                        # 2. THỰC THI PHÁN QUYẾT NGAY LẬP TỨC: Trao role Ngày & Sửa biệt danh
                         if day_role:
                             await member.add_roles(day_role)
                         
                         has_ba_chu = ba_chu_role in member.roles if ba_chu_role else False
                         if not has_ba_chu:
-                            # Dọn sạch các tiền tố cũ trước khi áp tiền tố mới
                             clean_name = member.display_name
                             for p in ALL_PREFIXES:
                                 clean_name = clean_name.replace(p, "")
@@ -237,7 +236,7 @@ class BaoThuSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
-        self.last_checked_date = None # Đánh dấu ngày đã thực hiện reset tránh chạy lặp
+        self.last_checked_date = None
         try:
             self.check_cycles.start()
         except Exception as e:
@@ -263,7 +262,6 @@ class BaoThuSystem(commands.Cog):
                 has_bot_role = any(r.name.lower() == "bots" for r in member.roles)
                 if has_bot_role: continue
                 
-                # Loại bỏ bớt tiền tố khi hiển thị trong danh sách lựa chọn cho gọn
                 clean_label = member.display_name
                 for p in ALL_PREFIXES:
                     clean_label = clean_label.replace(p, "")
@@ -292,6 +290,94 @@ class BaoThuSystem(commands.Cog):
         except Exception as e:
             print(f"[BaoThu] Lỗi nghiêm trọng tại lệnh setup: {e}")
             await interaction.followup.send(f"❌ Đã có lỗi xảy ra trong quá trình đồng bộ: {e}", ephemeral=True)
+
+    # --- LỆNH MỚI: PICK BÁO THỦ TRỰC TIẾP ---
+    @app_commands.command(name="pickbaothu", description="[Admin] Chỉ định trực tiếp 1 thành viên làm Báo Thủ (Ẩn danh người dùng lệnh)")
+    @app_commands.describe(
+        target="Chọn thành viên muốn gán danh hiệu",
+        loai="Chọn cấp độ Báo Thủ (Ngày / Tuần / Tháng)",
+        ly_do="Lý do xử phạt (Hiển thị trong thông báo)"
+    )
+    @app_commands.choices(loai=[
+        app_commands.Choice(name="Báo Thủ Của Ngày", value="day"),
+        app_commands.Choice(name="Báo Thủ Của Tuần", value="week"),
+        app_commands.Choice(name="Họa Thần Của Tháng", value="month")
+    ])
+    async def pickbaothu(self, interaction: discord.Interaction, target: discord.Member, loai: str, ly_do: str = "Không có lý do cụ thể"):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Bạn cần quyền Administrator để sử dụng lệnh này!", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        ba_chu_role = guild.get_role(ROLE_BA_CHU_ID)
+        has_ba_chu = ba_chu_role in target.roles if ba_chu_role else False
+
+        # Cấu hình danh mục theo loại
+        config_map = {
+            "day": {
+                "role_id": ROLE_DAY_ID,
+                "prefix": PREFIX_DAY,
+                "title": "🎭 BÁO THỦ CỦA NGÀY",
+                "color": discord.Color.gold(),
+                "db_field": "bao_day"
+            },
+            "week": {
+                "role_id": ROLE_WEEK_ID,
+                "prefix": PREFIX_WEEK,
+                "title": "🌪️ BÁO THỦ CỦA TUẦN",
+                "color": discord.Color.orange(),
+                "db_field": "bao_week"
+            },
+            "month": {
+                "role_id": ROLE_MONTH_ID,
+                "prefix": PREFIX_MONTH,
+                "title": "💀 HỌA THẦN CỦA THÁNG",
+                "color": discord.Color.dark_purple(),
+                "db_field": "bao_month"
+            }
+        }
+
+        cfg = config_map[loai]
+        role = guild.get_role(cfg["role_id"])
+
+        try:
+            # 1. Cập nhật Mongo DB
+            await self.db.users_points.update_one(
+                {"user_id": str(target.id)},
+                {"$inc": {cfg["db_field"]: 1}},
+                upsert=True
+            )
+
+            # 2. Add Role
+            if role:
+                await target.add_roles(role)
+
+            # 3. Đổi Nickname (nếu không phải Bá Chủ)
+            if not has_ba_chu:
+                clean_name = target.display_name
+                for p in ALL_PREFIXES:
+                    clean_name = clean_name.replace(p, "")
+                await target.edit(nick=f"{cfg['prefix']}{clean_name[:20]}")
+
+            # 4. Gửi thông báo công khai tới kênh hiện tại (Không hiện tên Admin)
+            embed = discord.Embed(
+                title=f"🚨 PHÁN QUYẾT BẤT CỦA HỘI ĐỒNG BAN HÀNH 🚨",
+                description=f"Căn cứ theo hành vi vi phạm, **{target.mention}** đã chính thức bị áp chế phong hiệu **{cfg['title']}**!\n\n📝 **Lý do:** {ly_do}\n🔥 **Hình phạt:** Trao Role và áp chế biệt danh mãnh liệt!",
+                color=cfg["color"]
+            )
+            embed.set_thumbnail(url=target.display_avatar.url)
+            embed.set_footer(text="Phán quyết tối cao từ Hội đồng Ẩn danh • Miễn khiếu nại!")
+
+            await interaction.channel.send(embed=embed)
+
+            # 5. Phản hồi riêng cho Admin thực thi lệnh
+            await interaction.followup.send(f"✅ Đã âm thầm chỉ định {target.mention} thành **{cfg['title']}** thành công!", ephemeral=True)
+
+        except Exception as e:
+            print(f"[BaoThu] Lỗi khi thi hành pickbaothu: {e}")
+            await interaction.followup.send(f"❌ Xảy ra lỗi khi thực thi lệnh: {e}", ephemeral=True)
 
     @app_commands.command(name="bxh_baothu", description="Xem Bảng Xếp Hạng tội đồ (Ngày / Tuần / Tháng)")
     @app_commands.choices(loai=[
@@ -359,25 +445,20 @@ class BaoThuSystem(commands.Cog):
             now_vn = get_vn_time()
             current_date_str = now_vn.strftime("%Y-%m-%d")
 
-            # Chỉ thực hiện xử lý nếu đã bước sang mốc 5 giờ sáng và chưa chạy cho ngày hôm nay
             if now_vn.hour == 5 and self.last_checked_date != current_date_str:
                 print(f"[BaoThu] Đang thực hiện xử lý reset chu kỳ tự động lúc 5h sáng ngày {current_date_str}...")
                 
                 guilds = self.bot.guilds
                 for guild in guilds:
-                    # 1. 🔥 QUAN TRỌNG: Tự động gỡ sạch Nickname lỗi/cũ và thu hồi role Ngày hôm trước trước khi chạy chu kỳ mới
                     await self.clear_all_day_titles(guild)
 
-                    # 2. Xử lý phong danh hiệu Tuần (Nếu là sáng Thứ Hai lúc 5h)
                     if now_vn.weekday() == 0: 
                         await self.reward_top_role(guild, "week", ROLE_WEEK_ID, "📅 BÁO THỦ CỦA TUẦN", PREFIX_WEEK)
 
-                    # 3. Xử lý phong danh hiệu Tháng (Nếu hôm nay là ngày mùng 1 đầu tháng mới)
                     if now_vn.day == 1:
                         await self.reward_top_role(guild, "month", ROLE_MONTH_ID, "💀 HỌA THẦN CỦA THÁNG", PREFIX_MONTH)
                         await self.process_sieu_cap_bao_thu(guild)
 
-                # Đánh dấu đã hoàn thành dọn dẹp ngày hôm nay
                 self.last_checked_date = current_date_str
         except Exception as loop_err:
             print(f"[BaoThu] Lỗi vòng lặp đồng bộ chu kỳ: {loop_err}")
@@ -389,13 +470,11 @@ class BaoThuSystem(commands.Cog):
             for member in day_role.members:
                 try:
                     await member.remove_roles(day_role)
-                    # Hoàn tác biệt danh sạch
                     new_nick = member.display_name
                     for p in ALL_PREFIXES:
                         new_nick = new_nick.replace(p, "")
                     await member.edit(nick=None if new_nick == member.name else new_nick)
                 except: pass
-        # Sau khi dọn dẹp xong xuôi, xoá trắng bảng điểm NGÀY trong Database về 0
         await self.db.users_points.update_many({}, {"$set": {"bao_day": 0}})
 
     async def reward_top_role(self, guild, mode: str, role_id: int, role_title: str, prefix_string: str):
@@ -407,13 +486,11 @@ class BaoThuSystem(commands.Cog):
             db_field = f"bao_{mode}"
             top_user = await self.db.users_points.find().sort(db_field, -1).limit(1).to_list(length=1)
             if not top_user or top_user[0].get(db_field, 0) == 0: 
-                # Nếu chu kỳ này không ai có điểm, xoá trắng data chu kỳ lớn cũ về 0 và kết thúc
                 await self.db.users_points.update_many({}, {"$set": {db_field: 0}})
                 return
 
             top_id = int(top_user[0]["user_id"])
 
-            # Gỡ bỏ role chu kỳ cũ của những người trước đó dính giải
             for m in role.members:
                 if m.id != top_id:
                     try:
@@ -422,7 +499,6 @@ class BaoThuSystem(commands.Cog):
                         await m.edit(nick=None if new_nick == m.name else new_nick)
                     except: pass
 
-            # Trao giải phong tước hiệu cho người thắng cuộc mới
             winner = guild.get_member(top_id) or await guild.fetch_member(top_id)
             if winner:
                 ba_chu_role = guild.get_role(ROLE_BA_CHU_ID)
@@ -441,7 +517,6 @@ class BaoThuSystem(commands.Cog):
                         await channel.send(f"🚨 **PHONG THẦN ĐẢO CHÍNH (5H SÁNG):** Kính cẩn nghiêng mình trước {winner.mention}, hung thần vừa chính thức sở hữu danh hiệu long trời lở đất **{role_title}**!")
                 except: pass
 
-            # Xoá trắng bảng điểm của chu kỳ này về 0 để chuẩn bị vòng đua mới
             await self.db.users_points.update_many({}, {"$set": {db_field: 0}})
         except Exception as e:
             print(f"[BaoThu] Lỗi xử lý trao role chu kỳ {mode}: {e}")
