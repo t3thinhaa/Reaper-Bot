@@ -419,7 +419,7 @@ class BaoThuSystem(commands.Cog):
                 await target.edit(nick=f"{cfg['prefix']}{clean_name.strip()}"[:32])
 
             embed = discord.Embed(
-                title=f"🚨 PHÁN QUYẾT BẤT CỦA HỘI ĐỒNG BAN HÀNH 🚨",
+                title=f"🚨 PHÁN QUYẾT CỦA HỘI ĐỒNG 🚨",
                 description=f"Căn cứ theo hành vi, **{target.mention}** bị áp chế phong hiệu **{cfg['title']}**!\n\n📝 **Lý do:** {ly_do}",
                 color=cfg["color"]
             )
