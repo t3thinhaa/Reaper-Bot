@@ -1,11 +1,10 @@
+import os
+import json
 import discord
 from discord.ext import commands
 from discord import app_commands
-import random
-import json
-import os
+from database import get_db_connection
 
-# Đường dẫn đến file JSON mới của bạn
 CHALLENGES_FILE = "./data/challenges.json"
 
 def load_challenges_from_file():
@@ -13,29 +12,24 @@ def load_challenges_from_file():
         return []
     try:
         with open(CHALLENGES_FILE, "r", encoding="utf-8") as f:
-            # Đọc JSON siêu gọn, tự động chuyển thành danh sách Python Dictionary
             return json.load(f)
     except Exception as e:
         print(f"❌ Lỗi cấu trúc file JSON hoặc không đọc được file: {e}")
         return []
 
-# ==========================================
-# BẢNG ĐIỀU KHIỂN TRUNG TÂM VĨNH CỬU TỐI GIẢN
-# ==========================================
 class ChallengeControlView(discord.ui.View):
     def __init__(self, current_challenge_idx=0):
-        super().__init__(timeout=None) # Giúp nút bấm sống mãi mãi qua các lần restart bot
+        super().__init__(timeout=None)
         self.challenges = load_challenges_from_file()
         self.idx = current_challenge_idx if self.challenges else 0
 
     def get_current_embed(self):
         if not self.challenges:
-            embed = discord.Embed(
+            return discord.Embed(
                 title="❌ Hệ Thống Trống", 
-                description="Kho dữ liệu hiện đang trống hoặc file `challenges.json` bị lỗi định dạng dấu ngoặc. Hãy kiểm tra lại!", 
+                description="Kho dữ liệu hiện đang trống hoặc file `challenges.json` bị lỗi định dạng.", 
                 color=discord.Color.red()
             )
-            return embed
         
         c = self.challenges[self.idx % len(self.challenges)]
         embed = discord.Embed(
@@ -51,13 +45,11 @@ class ChallengeControlView(discord.ui.View):
             embed.set_image(url="attachment://ReaperChallenge.png")
         return embed
 
-    # --- NÚT 1: ĐỔI THỬ THÁCH ---
     @discord.ui.button(label="🎲 Đổi Thử Thách", style=discord.ButtonStyle.secondary, custom_id="btn_next_challenge")
     async def next_challenge(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Đề phòng trường hợp bạn vừa cập nhật file json khi bot đang chạy, nó sẽ tự nạp lại dữ liệu mới
         self.challenges = load_challenges_from_file()
         if not self.challenges:
-            return await interaction.response.send_message("❌ File JSON trống hoặc lỗi cấu trúc, không thể đổi!", ephemeral=True)
+            return await interaction.response.send_message("❌ File JSON trống hoặc lỗi cấu trúc!", ephemeral=True)
             
         self.idx += 1
         embed = self.get_current_embed()
@@ -70,67 +62,75 @@ class ChallengeControlView(discord.ui.View):
             
         await interaction.response.defer()
 
-    # --- NÚT 2: NHẬN KÈO (TỰ ĐỘNG ĐÈ KÈO CŨ) ---
     @discord.ui.button(label="✅ Nhận Kèo", style=discord.ButtonStyle.success, custom_id="btn_accept_challenge")
     async def accept_challenge(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db = interaction.client.db
-        if db is None: 
-            return await interaction.response.send_message("❌ Lỗi kết nối Database đám mây!", ephemeral=True)
-        
         if not self.challenges:
             return await interaction.response.send_message("❌ Không có thử thách khả dụng!", ephemeral=True)
 
         user_id = str(interaction.user.id)
+        guild_id = str(interaction.guild_id)
         c = self.challenges[self.idx % len(self.challenges)]
+        title = c.get('title', 'Thử thách ẩn')
+        reward = c.get('reward', 0)
         
-        # Ghi đè trạng thái thẳng lên MongoDB để đổi kèo tự do không lo kẹt trạng thái cũ
-        await db.users_points.update_one(
-            {"user_id": user_id},
-            {
-                "$set": {
-                    "user_name": interaction.user.name,
-                    "current_challenge": c.get('title'),
-                    "challenge_reward": c.get('reward', 0),
-                    "status": "DOING"
-                }
-            },
-            upsert=True
-        )
-        await interaction.response.send_message(f"⚔️ Bạn đã nhận thử thách: **{c.get('title')}**. Hệ thống đã ghi nhận!", ephemeral=True)
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO users_points (user_id, guild_id, user_name, current_challenge, challenge_reward, status)
+                VALUES (%s, %s, %s, %s, %s, 'DOING')
+                ON CONFLICT (user_id, guild_id) DO UPDATE SET
+                    user_name = EXCLUDED.user_name,
+                    current_challenge = EXCLUDED.current_challenge,
+                    challenge_reward = EXCLUDED.challenge_reward,
+                    status = 'DOING';
+            ''', (user_id, guild_id, interaction.user.name, title, reward))
+            conn.commit()
+            cursor.close()
+            conn.close()
 
-    # --- NÚT 3: TỰ DUYỆT TỰ ĐỘNG CỘNG ĐIỂM ---
+            await interaction.response.send_message(f"⚔️ Bạn đã nhận thử thách: **{title}**. Hệ thống đã ghi nhận!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Lỗi ghi Database: {e}", ephemeral=True)
+
     @discord.ui.button(label="🏆 Tôi Đã Xong", style=discord.ButtonStyle.primary, custom_id="btn_self_complete")
     async def self_complete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db = interaction.client.db
-        if db is None: return
-
         user_id = str(interaction.user.id)
-        user_data = await db.users_points.find_one({"user_id": user_id})
-
-        # Phòng vệ lỗi vặt: Nếu chưa nhận kèo hoặc kèo trống thì chặn click tặc
-        if not user_data or user_data.get("status") != "DOING" or user_data.get("current_challenge") == "None":
-            return await interaction.response.send_message("❌ Bạn chưa bấm nhận thử thách nào trên bảng điều khiển!", ephemeral=True)
-
-        challenge_title = user_data.get("current_challenge", "Thử thách ẩn")
-        reward = user_data.get("challenge_reward", 0)
-
-        # Chống spam ghi dữ liệu trùng lặp lên Database
-        await db.users_points.update_one(
-            {"user_id": user_id},
-            {
-                "$set": {"status": "DONE", "current_challenge": "None", "challenge_reward": 0},
-                "$inc": {"soul_points": reward}
-            }
-        )
-
-        # 1. Phản hồi ẩn (Chỉ người bấm nút nhìn thấy) để xác nhận hệ thống đã xử lý xong
-        await interaction.response.send_message(f"🎉 Hệ thống tự động cộng **`+{reward}`** Điểm Linh Hồn vào ví của bạn thành công!", ephemeral=True)
+        guild_id = str(interaction.guild_id)
         
-        # 2. Tin nhắn vinh danh công khai gửi vào kênh chat và tự động xóa sau 7 giây để tránh trôi bảng setup
-        await interaction.channel.send(
-            f"🔥 **{interaction.user.mention}** đã tự lực hoàn thành thử thách: **{challenge_title}** ➡️ Đút túi thành công `{reward}` điểm!",
-            delete_after=7  # Số giây tồn tại trước khi tự hủy (bạn có thể chỉnh tùy ý)
-        )
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT current_challenge, challenge_reward, status FROM users_points WHERE user_id = %s AND guild_id = %s', (user_id, guild_id))
+            user_data = cursor.fetchone()
+
+            if not user_data or user_data[2] != "DOING" or user_data[0] == "None":
+                cursor.close()
+                conn.close()
+                return await interaction.response.send_message("❌ Bạn chưa bấm nhận thử thách nào!", ephemeral=True)
+
+            challenge_title = user_data[0]
+            reward = user_data[1]
+
+            cursor.execute('''
+                UPDATE users_points
+                SET status = 'DONE',
+                    current_challenge = 'None',
+                    challenge_reward = 0,
+                    soul_points = soul_points + %s
+                WHERE user_id = %s AND guild_id = %s;
+            ''', (reward, user_id, guild_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await interaction.response.send_message(f"🎉 Hệ thống tự động cộng **`+{reward}`** Điểm Linh Hồn vào ví của bạn!", ephemeral=True)
+            await interaction.channel.send(
+                f"🔥 **{interaction.user.mention}** đã tự lực hoàn thành thử thách: **{challenge_title}** ➡️ Đút túi `{reward}` điểm!",
+                delete_after=7
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Lỗi xử lý Database: {e}", ephemeral=True)
 
 class ChallengeCog(commands.Cog):
     def __init__(self, bot):
@@ -142,8 +142,7 @@ class ChallengeCog(commands.Cog):
         view = ChallengeControlView()
         embed = view.get_current_embed()
         
-        # Phản hồi ẩn sạch sẽ để che đi tên Admin gõ lệnh
-        await interaction.response.send_message("⚙️Đang tải lên thử thách", ephemeral=True)
+        await interaction.response.send_message("⚙️ Đang tải lên thử thách", ephemeral=True)
         
         if os.path.exists("./data/images/ReaperChallenge.png"):
             file = discord.File("./data/images/ReaperChallenge.png", filename="ReaperChallenge.png")
@@ -153,5 +152,4 @@ class ChallengeCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ChallengeCog(bot))
-    # Đăng ký view cố định với bot chính
     bot.add_view(ChallengeControlView())

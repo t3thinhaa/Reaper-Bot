@@ -2,8 +2,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import random
-import asyncio  # Cần thiết để làm countdown và xóa tin nhắn
+import asyncio
 from cogs.challenge import load_challenges_from_file
+from database import get_db_connection
 
 # ID của Role "Bá Chủ Chiến Trường"
 BA_CHU_ROLE_ID = 1524827906357067879  
@@ -20,12 +21,26 @@ class ShopDropdown(discord.ui.Select):
         super().__init__(placeholder="Chọn vật phẩm muốn quy đổi từ Linh Hồn...", options=options, custom_id="reaper_shop_select")
 
     async def callback(self, interaction: discord.Interaction):
-        db = interaction.client.db
-        if db is None: return
-
         user_id = str(interaction.user.id)
-        user_data = await db.users_points.find_one({"user_id": user_id})
-        current_points = user_data.get("soul_points", 0) if user_data else 0
+        guild_id = str(interaction.guild_id)
+
+        # Lấy thông tin điểm và trạng thái người dùng từ PostgreSQL
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT soul_points, status, current_challenge FROM users_points WHERE user_id = %s AND guild_id = %s",
+                (user_id, guild_id)
+            )
+            user_data = cursor.fetchone()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            return await interaction.response.send_message(f"❌ Lỗi kết nối Database: {e}", ephemeral=True)
+
+        current_points = user_data[0] if user_data else 0
+        status = user_data[1] if (user_data and user_data[1]) else "Chưa nhận"
+        current_challenge = user_data[2] if (user_data and user_data[2]) else "None"
 
         prices = {
             "item_disregard": 100, 
@@ -39,25 +54,20 @@ class ShopDropdown(discord.ui.Select):
         cost = prices[selected_item]
 
         if current_points < cost:
-            await interaction.response.send_message(f"❌ Khí chất bất thành! Bạn cần có `{cost}` điểm, hiện tại bạn chỉ có `{current_points}` điểm. Hãy làm thêm thử thách!", ephemeral=True)
-            return
+            return await interaction.response.send_message(f"❌ Khí chất bất thành! Bạn cần có `{cost}` điểm, hiện tại bạn chỉ có `{current_points}` điểm. Hãy làm thêm thử thách!", ephemeral=True)
 
-        # Hàm helper xử lý thông báo tự hủy sau 10 giây (Có đếm ngược)
+        # Helper thông báo tự hủy
         async def send_temporary_announcement(embed_content=None, text_content=None):
-            # Gửi thông báo ban đầu
             msg = await interaction.channel.send(content=text_content, embed=embed_content)
-            # Khởi tạo đếm ngược (Countdown) bằng cách sửa tin nhắn mỗi giây
             for i in range(10, 0, -1):
                 suffix = f"\n\n*🟢 Tin nhắn này sẽ tự hủy sau {i} giây...*"
                 if embed_content:
-                    # Tạo bản sao clone của embed để tránh ghi đè dữ liệu gốc
                     new_embed = embed_content.to_dict()
                     new_embed['description'] = embed_content.description + suffix
                     await msg.edit(embed=discord.Embed.from_dict(new_embed))
                 else:
                     await msg.edit(content=text_content + suffix)
                 await asyncio.sleep(1)
-            # Tiến hành xóa sau khi hết 10 giây
             try:
                 await msg.delete()
             except discord.NotFound:
@@ -67,18 +77,27 @@ class ShopDropdown(discord.ui.Select):
         # LOGIC 1: THẺ MIỄN TỬ
         # ==========================================
         if selected_item == "item_disregard":
-            status = user_data.get("status", "Chưa nhận") if user_data else "Chưa nhận"
             if status != "DOING":
-                await interaction.response.send_message("❌ Bạn hiện tại đâu có thực hiện thử thách nào dở dang đâu!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Bạn hiện tại đâu có thực hiện thử thách nào dở dang đâu!", ephemeral=True)
             
-            await db.users_points.update_one(
-                {"user_id": user_id},
-                {"$inc": {"soul_points": -cost}, "$set": {"status": "DONE", "current_challenge": "None", "challenge_reward": 0}}
-            )
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE users_points 
+                    SET soul_points = soul_points - %s, status = 'DONE', current_challenge = 'None', challenge_reward = 0 
+                    WHERE user_id = %s AND guild_id = %s
+                    """,
+                    (cost, user_id, guild_id)
+                )
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                return await interaction.response.send_message(f"❌ Lỗi xử lý Database: {e}", ephemeral=True)
+
             await interaction.response.send_message("🛡️ Bạn đã sử dụng **Thẻ Miễn Tử** thành công!", ephemeral=True)
-            
-            # Kích hoạt thông báo tự hủy
             await send_temporary_announcement(text_content=f"💨 **{interaction.user.mention}** đã tiêu hao `100` Điểm Linh Hồn để kích hoạt **Thẻ Miễn Tử**, xóa sổ kèo đang làm dở thành công!")
             return
 
@@ -90,32 +109,56 @@ class ShopDropdown(discord.ui.Select):
             all_members = [m for m in all_members if not any(r.id == BA_CHU_ROLE_ID for r in m.roles)]
 
             if not all_members:
-                await interaction.response.send_message("❌ Server không có ai hợp lệ để gài bẫy!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Server không có ai hợp lệ để gài bẫy!", ephemeral=True)
             
             victim = random.choice(all_members)
             victim_id = str(victim.id)
             
-            victim_data = await db.users_points.find_one({"user_id": victim_id})
-            if victim_data and victim_data.get("status") == "DOING":
-                await interaction.response.send_message(f"❌ Gài bẫy thất bại! Thần may mắn đã mỉm cười với {victim.name}.", ephemeral=True)
-                return
+            # Kiểm tra nạn nhân có đang bận thử thách khác không
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT status FROM users_points WHERE user_id = %s AND guild_id = %s", (victim_id, guild_id))
+                victim_row = cursor.fetchone()
+                victim_status = victim_row[0] if victim_row else None
+            except Exception as e:
+                return await interaction.response.send_message(f"❌ Lỗi kiểm tra nạn nhân: {e}", ephemeral=True)
+
+            if victim_status == "DOING":
+                cursor.close()
+                conn.close()
+                return await interaction.response.send_message(f"❌ Gài bẫy thất bại! Thần may mắn đã mỉm cười với {victim.name}.", ephemeral=True)
 
             try:
                 all_challenges = load_challenges_from_file()
                 hard_challenges = [c for c in all_challenges if "Khó" in c['difficulty']]
                 chosen_challenge = random.choice(hard_challenges) if hard_challenges else random.choice(all_challenges)
             except Exception:
-                await interaction.response.send_message("❌ Hệ thống file thử thách gặp lỗi!", ephemeral=True)
-                return
+                cursor.close()
+                conn.close()
+                return await interaction.response.send_message("❌ Hệ thống file thử thách gặp lỗi!", ephemeral=True)
 
-            await db.users_points.update_one({"user_id": user_id}, {"$inc": {"soul_points": -cost}})
-            await db.users_points.update_one(
-                {"user_id": victim_id},
-                {"$set": {"user_name": victim.name, "current_challenge": chosen_challenge['title'], "challenge_reward": chosen_challenge['reward'], "status": "DOING"}},
-                upsert=True
-            )
-            
+            try:
+                # Trừ điểm kẻ gài bẫy
+                cursor.execute("UPDATE users_points SET soul_points = soul_points - %s WHERE user_id = %s AND guild_id = %s", (cost, user_id, guild_id))
+                
+                # Sập bẫy nạn nhân (Upsert)
+                trap_query = """
+                    INSERT INTO users_points (user_id, guild_id, user_name, current_challenge, challenge_reward, status)
+                    VALUES (%s, %s, %s, %s, %s, 'DOING')
+                    ON CONFLICT (user_id, guild_id) DO UPDATE SET
+                        user_name = EXCLUDED.user_name,
+                        current_challenge = EXCLUDED.current_challenge,
+                        challenge_reward = EXCLUDED.challenge_reward,
+                        status = 'DOING';
+                """
+                cursor.execute(trap_query, (victim_id, guild_id, victim.name, chosen_challenge['title'], chosen_challenge['reward']))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                return await interaction.response.send_message(f"❌ Lỗi gài bẫy Database: {e}", ephemeral=True)
+
             await interaction.response.send_message(f"🎭 Đã kích hoạt Vé Gài Bẫy thành công! `-200` điểm.", ephemeral=True)
             
             trap_embed = discord.Embed(title="🎭 ỐI DỒI ÔI! CÓ KẺ GÀI BẪY!", color=discord.Color.red())
@@ -129,28 +172,36 @@ class ShopDropdown(discord.ui.Select):
             return
 
         # ==========================================
-        # ĐỀ XUẤT THÊM 1: VÉ ĐỔI VẬN (REROLL CHALLENGE)
+        # LOGIC 3: VÉ ĐỔI VẬN (REROLL)
         # ==========================================
         elif selected_item == "item_reroll":
-            status = user_data.get("status", "Chưa nhận") if user_data else "Chưa nhận"
             if status != "DOING":
-                await interaction.response.send_message("❌ Bạn phải đang làm một thử thách nào đó thì mới đổi được chứ!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Bạn phải đang làm một thử thách nào đó thì mới đổi được chứ!", ephemeral=True)
             
             try:
                 all_challenges = load_challenges_from_file()
-                # Tìm thử thách mới ngẫu nhiên khác thử thách hiện tại
-                available = [c for c in all_challenges if c['title'] != user_data.get("current_challenge")]
+                available = [c for c in all_challenges if c['title'] != current_challenge]
                 new_challenge = random.choice(available)
             except Exception:
-                await interaction.response.send_message("❌ Hệ thống file gặp lỗi!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Hệ thống file gặp lỗi!", ephemeral=True)
 
-            await db.users_points.update_one(
-                {"user_id": user_id},
-                {"$inc": {"soul_points": -cost}, "$set": {"current_challenge": new_challenge['title'], "challenge_reward": new_challenge['reward']}}
-            )
-            
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE users_points 
+                    SET soul_points = soul_points - %s, current_challenge = %s, challenge_reward = %s 
+                    WHERE user_id = %s AND guild_id = %s
+                    """,
+                    (cost, new_challenge['title'], new_challenge['reward'], user_id, guild_id)
+                )
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                return await interaction.response.send_message(f"❌ Lỗi đổi vận Database: {e}", ephemeral=True)
+
             await interaction.response.send_message("🎲 Đã đổi vận thành công!", ephemeral=True)
             reroll_embed = discord.Embed(title="🎲 ĐỔI VẬN THÀNH CÔNG", color=discord.Color.purple())
             reroll_embed.description = f"🔄 **{interaction.user.mention}** đã đổi thử thách sang: **{new_challenge['title']}** (Thưởng: `{new_challenge['reward']}` điểm)"
@@ -158,7 +209,7 @@ class ShopDropdown(discord.ui.Select):
             return
 
         # ==========================================
-        # ĐỀ XUẤT THÊM 2: KÍNH CHIẾU YÊU (XEM TRƯỚC FILE)
+        # LOGIC 4: KÍNH CHIẾU YÊU
         # ==========================================
         elif selected_item == "item_reveal":
             try:
@@ -166,33 +217,41 @@ class ShopDropdown(discord.ui.Select):
                 preview_challenges = random.sample(all_challenges, min(3, len(all_challenges)))
                 preview_text = "\n".join([f"• **{c['title']}** ({c['difficulty']}) - Thưởng: {c['reward']}" for c in preview_challenges])
             except Exception:
-                await interaction.response.send_message("❌ Không thể đọc danh sách thử thách!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Không thể đọc danh sách thử thách!", ephemeral=True)
 
-            await db.users_points.update_one({"user_id": user_id}, {"$inc": {"soul_points": -cost}})
-            
-            # Gửi tin nhắn ẩn (Ephemeral) riêng cho người mua để họ xem lén, không ai thấy được
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users_points SET soul_points = soul_points - %s WHERE user_id = %s AND guild_id = %s", (cost, user_id, guild_id))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                return await interaction.response.send_message(f"❌ Lỗi trừ điểm Database: {e}", ephemeral=True)
+
             await interaction.response.send_message(f"🕶️ **Kính Chiếu Yêu hé lộ 3 thử thách ngẫu nhiên trong kho:**\n{preview_text}\n*(Tin nhắn này chỉ một mình bạn nhìn thấy)*", ephemeral=True)
-            
-            # Gửi thông báo công khai cho server biết có người hack map (tự xóa sau 10s)
             await send_temporary_announcement(text_content=f"🕶️ **{interaction.user.mention}** vừa mua **Kính Chiếu Yêu** để xem trước thiên cơ (kho thử thách)!")
             return
 
         # ==========================================
-        # LOGIC 3: BÁ CHỦ CHIẾN TRƯỜNG
+        # LOGIC 5: BÁ CHỦ CHIẾN TRƯỜNG
         # ==========================================
         elif selected_item == "item_bachu":
             role = interaction.guild.get_role(BA_CHU_ROLE_ID)
             if role in interaction.user.roles:
-                await interaction.response.send_message("❌ Bạn đã đạt danh hiệu **Bá Chủ Chiến Trường** rồi!", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Bạn đã đạt danh hiệu **Bá Chủ Chiến Trường** rồi!", ephemeral=True)
 
             if role is None:
-                await interaction.response.send_message("❌ Không tìm thấy Role mang ID này trên Server.", ephemeral=True)
-                return
+                return await interaction.response.send_message("❌ Không tìm thấy Role mang ID này trên Server.", ephemeral=True)
 
             try:
-                await db.users_points.update_one({"user_id": user_id}, {"$inc": {"soul_points": -cost}})
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users_points SET soul_points = soul_points - %s WHERE user_id = %s AND guild_id = %s", (cost, user_id, guild_id))
+                conn.commit()
+                cursor.close()
+                conn.close()
+
                 await interaction.user.add_roles(role)
 
                 try:
@@ -212,7 +271,6 @@ class ShopDropdown(discord.ui.Select):
                 )
                 announce_embed.set_thumbnail(url=interaction.user.display_avatar.url)
                 
-                # Lưu ý: Thông báo Vua mới này giữ nguyên (không cho tự xóa) vì đây là sự kiện chấn động Server!
                 await interaction.channel.send(embed=announce_embed)
 
             except discord.Forbidden:
@@ -232,8 +290,6 @@ class ShopCog(commands.Cog):
 
     @app_commands.command(name="shop", description="Mở cửa hàng vật phẩm tự động bằng Điểm Linh Hồn")
     async def shop(self, interaction: discord.Interaction):
-        # SỬA ĐỔI: Sử dụng interaction.response.send_message thông thường thay vì gán tên user 
-        # Hệ thống View này sẽ nằm cố định tại Channel đó mãi mãi (persistent), không hiện ai gọi ra.
         embed = discord.Embed(
             title="🏪 CHỢ ĐEN LINH HỒN (AUTOMATED REAPER SHOP)",
             description="Hệ thống tự động hóa 100%. Mua xong kích hoạt quyền lợi tại chỗ!",
@@ -248,7 +304,6 @@ class ShopCog(commands.Cog):
         ), inline=False)
         embed.set_footer(text="Hãy chọn món đồ muốn sở hữu ở thanh chọn bên dưới!")
         
-        # Gửi thẳng vào kênh chat (Tồn tại vĩnh viễn)
         await interaction.response.send_message(embed=embed, view=ShopView())
 
 async def setup(bot):
