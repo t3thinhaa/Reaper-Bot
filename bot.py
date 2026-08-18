@@ -54,34 +54,31 @@ class ReaperBot(commands.Bot):
             help_command=None
         )
 
-    async def setup_hook(self):
-        # --- BƯỚC 1: KHỞI TẠO BẢNG POSTGRESQL DATABASE ---
-        print("🟢 Đang kết nối và khởi tạo bảng trong PostgreSQL...")
-        try:
-            init_db()
-            print("🟢 Đã khởi tạo thành công PostgreSQL Database!")
-        except Exception as e:
-            print(f"❌ Lỗi khởi tạo PostgreSQL Database: {e}")
+    async def main():
+        # 1. Chạy Flask Server ngầm
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
 
-        # --- BƯỚC 2: TỰ ĐỘNG NẠP TOÀN BỘ COGS ---
-        if os.path.exists("./cogs"):
-            for file in os.listdir("./cogs"):
-                if file.endswith(".py") and file != "__init__.py":
-                    try:
-                        await self.load_extension(f"cogs.{file[:-3]}")
-                        print(f"Loaded extension: {file}")
-                    except Exception as e:
-                        print(f"❌ Lỗi khi nạp file {file}: {e}")
-        else:
-            print("⚠️ Thư mục './cogs' không tồn tại, bỏ qua bước nạp Cogs.")
+        if not TOKEN:
+            print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN!")
+            return
 
-        # --- BƯỚC 3: ĐỒNG BỘ SLASH COMMANDS ---
-        print("Synchronizing application commands...")
-        try:
-            synced = await self.tree.sync()
-            print(f"Successfully synced {len(synced)} slash command(s).")
-        except Exception as e:
-            print(f"❌ Không thể đồng bộ lệnh lên Discord: {e}")
+        # 2. Vòng lặp tự kết nối lại nếu dính Rate Limit
+        retry_delay = 300  # 5 phút
+        while True:
+            bot = ReaperBot()
+            try:
+                await bot.start(TOKEN)
+            except discord.errors.HTTPException as e:
+                if e.status == 429:
+                    print(f"⚠️ CẢNH BÁO: Bị Discord/Cloudflare Rate Limit (429)! Tạm nghỉ {retry_delay // 60} phút rồi thử lại...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    print(f"❌ Lỗi HTTP: {e}")
+                    await asyncio.sleep(30)
+            except Exception as e:
+                print(f"❌ Lỗi ngoài dự kiến khi khởi chạy Bot: {e}")
+                await asyncio.sleep(30)
 
     async def on_ready(self):
         print("=" * 40)
