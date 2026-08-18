@@ -2,7 +2,40 @@ import os
 import logging
 import threading
 import asyncio
+import ssl
 import discord
+
+try:
+    import certifi
+except ImportError:
+    class certifi:
+        """Fallback CA bundle resolver for environments without the certifi package."""
+
+        @staticmethod
+        def where():
+            cafile = os.environ.get("SSL_CERT_FILE")
+            if cafile and os.path.exists(cafile):
+                return cafile
+
+            default_paths = ssl.get_default_verify_paths()
+            if getattr(default_paths, "cafile", None) and os.path.exists(default_paths.cafile):
+                return default_paths.cafile
+
+            for candidate in (
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/ssl/cert.pem",
+                "/etc/ssl/certs.pem",
+                "/System/Library/OpenSSL/certs.pem",
+            ):
+                if os.path.exists(candidate):
+                    return candidate
+
+            raise FileNotFoundError(
+                "No CA certificate bundle was found on this system. "
+                "Install certifi or configure SSL_CERT_FILE."
+            )
+
 from discord.ext import commands
 from flask import Flask
 from motor.motor_asyncio import AsyncIOMotorClient # Thư viện kết nối MongoDB bất đồng bộ chuẩn bài cho discord.py
@@ -56,15 +89,22 @@ class ReaperBot(commands.Bot):
 
     async def setup_hook(self):
         # --- BƯỚC 1: KẾT NỐI MONGODB ĐÁM MÂY ---
-        # Mình sẽ lấy chuỗi kết nối URI từ file .env (hoặc từ cài đặt môi trường trên Render).
         mongo_uri = os.getenv("MONGODB_URI")
         if mongo_uri:
             try:
-                # Sử dụng AsyncIOMotorClient để khi bot truy vấn data, nó không làm đơ (block) luồng xử lý của Bot.
-                self.db_client = AsyncIOMotorClient(mongo_uri)
-                # Đặt tên database là 'reaper_db'. MongoDB sẽ tự tạo db này nếu nó chưa tồn tại.
+                # Sử dụng AsyncIOMotorClient kèm chứng chỉ SSL từ certifi và các tham số timeout
+                self.db_client = AsyncIOMotorClient(
+                    mongo_uri,
+                    tlsCAFile=certifi.where(),       # Tránh lỗi SSL handshake trên Render
+                    serverSelectionTimeoutMS=5000,    # Timeout 5s nếu không kết nối được
+                    socketTimeoutMS=45000,            # Tự đóng socket bị ngắt đột ngột
+                    maxPoolSize=20,
+                    minPoolSize=2
+                )
+                
+                # Đặt tên database là 'reaper_db'
                 self.db = self.db_client['reaper_db']
-                print("🗄️ Đã khởi tạo cấu hình kết nối MongoDB đám mây!")
+                print("🟢 Đã khởi tạo cấu hình kết nối MongoDB đám mây!")
             except Exception as e:
                 print(f"❌ Lỗi kết nối MongoDB: {e}")
                 self.db = None
