@@ -100,22 +100,25 @@ async def main():
     flask_thread.start()
 
     if not TOKEN:
-        print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN trong Environment Variables hoặc file config.py!")
+        print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN!")
         return
 
-    bot = ReaperBot()
-
-    # 2. Chạy bot kèm bộ lọc hoãn 5 phút nếu bị ăn Rate Limit (HTTP 429)
-    try:
-        await bot.start(TOKEN)
-    except discord.errors.HTTPException as e:
-        if e.status == 429:
-            print("⚠️ CẢNH BÁO: Bị Discord/Cloudflare Rate Limit (429)! Đang tạm nghỉ 5 phút tránh bị ban IP...")
-            await asyncio.sleep(300)
-        else:
-            raise e
-    except Exception as e:
-        print(f"❌ Lỗi ngoài dự kiến khi khởi chạy Bot: {e}")
+    # 2. Vòng lặp tự kết nối lại nếu dính Rate Limit
+    retry_delay = 300  # 5 phút
+    while True:
+        bot = ReaperBot()
+        try:
+            await bot.start(TOKEN)
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                print(f"⚠️ CẢNH BÁO: Bị Discord/Cloudflare Rate Limit (429)! Tạm nghỉ {retry_delay // 60} phút rồi thử lại...")
+                await asyncio.sleep(retry_delay)
+            else:
+                print(f"❌ Lỗi HTTP: {e}")
+                await asyncio.sleep(30)
+        except Exception as e:
+            print(f"❌ Lỗi ngoài dự kiến khi khởi chạy Bot: {e}")
+            await asyncio.sleep(30)
 
 if __name__ == "__main__":
     try:
