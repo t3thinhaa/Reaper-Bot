@@ -6,28 +6,16 @@ import discord
 from discord.ext import commands
 from flask import Flask
 
-# Import hàm khởi tạo database PostgreSQL
+# Import các biến cấu hình trung tâm
+from config import TOKEN, GUILD_ID, PORT
 from database import init_db
 
-# ==========================================
-# 1. CẤU HÌNH LOGGING CHUẨN (ẨN LOG THỪA)
-# ==========================================
+# Logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
-# Lấy TOKEN từ biến môi trường của Render (hoặc file config nếu có)
-TOKEN = os.getenv("DISCORD_TOKEN")
-if not TOKEN:
-    try:
-        from config import TOKEN
-    except ImportError:
-        TOKEN = None
-
-# ==========================================
-# 2. KHỞI TẠO WEB SERVER (KEEP ALIVE FOR RENDER)
-# ==========================================
+# Web Server Keep-Alive
 app = Flask('')
 
 @app.route('/')
@@ -35,12 +23,9 @@ def home():
     return "Bot is alive!", 200
 
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-# ==========================================
-# 3. CLASS CHÍNH REAPER BOT
-# ==========================================
+# Bot Class
 class ReaperBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -55,14 +40,12 @@ class ReaperBot(commands.Bot):
         )
 
     async def setup_hook(self):
-        # --- BƯỚC 1: KHỞI TẠO BẢNG POSTGRESQL DATABASE ---
-        print("🟢 Đang kết nối và khởi tạo bảng trong PostgreSQL...")
+        print("🟢 Đang kết nối và khởi tạo bảng trong Database...")
         try:
-            init_db()
+            await init_db()
         except Exception as e:
-            print(f"❌ Lỗi khởi tạo PostgreSQL Database: {e}")
+            print(f"❌ Lỗi khởi tạo Database: {e}")
 
-        # --- BƯỚC 2: TỰ ĐỘNG NẠP TOÀN BỘ COGS ---
         if os.path.exists("./cogs"):
             for file in os.listdir("./cogs"):
                 if file.endswith(".py") and file != "__init__.py":
@@ -71,16 +54,19 @@ class ReaperBot(commands.Bot):
                         print(f"Loaded extension: {file}")
                     except Exception as e:
                         print(f"❌ Lỗi khi nạp file {file}: {e}")
-        else:
-            print("⚠️ Thư mục './cogs' không tồn tại, bỏ qua bước nạp Cogs.")
 
-        # --- BƯỚC 3: ĐỒNG BỘ SLASH COMMANDS ---
         print("Synchronizing application commands...")
         try:
-            synced = await self.tree.sync()
-            print(f"Successfully synced {len(synced)} slash command(s).")
+            if GUILD_ID:
+                guild = discord.Object(id=GUILD_ID)
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                print(f"Successfully synced {len(synced)} slash command(s) to Guild {GUILD_ID}.")
+            else:
+                synced = await self.tree.sync()
+                print(f"Successfully synced {len(synced)} global slash command(s).")
         except Exception as e:
-            print(f"❌ Không thể đồng bộ lệnh lên Discord: {e}")
+            print(f"❌ Không thể đồng bộ lệnh: {e}")
 
     async def on_ready(self):
         print("=" * 40)
@@ -93,33 +79,28 @@ class ReaperBot(commands.Bot):
             activity=discord.Activity(type=discord.ActivityType.playing, name="PUBG Multiverse")
         )
 
-# ==========================================
-# 4. KHỞI CHẠY HỆ THỐNG CÓ BẮT LỖI RATE LIMIT
-# ==========================================
 async def main():
-    # 1. Chạy Flask Server ngầm duy nhất 1 lần
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
     if not TOKEN:
         print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN!")
         return
 
-    # 2. Vòng lặp tự kết nối lại nếu dính Rate Limit
-    retry_delay = 300  # 5 phút
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    retry_delay = 300
     while True:
         bot = ReaperBot()
         try:
             await bot.start(TOKEN)
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                print(f"⚠️ CẢNH BÁO: Bị Discord/Cloudflare Rate Limit (429)! Tạm nghỉ {retry_delay // 60} phút rồi thử lại...")
+                print(f"⚠️ Rate Limit (429)! Tạm nghỉ {retry_delay // 60} phút...")
                 await asyncio.sleep(retry_delay)
             else:
                 print(f"❌ Lỗi HTTP: {e}")
                 await asyncio.sleep(30)
         except Exception as e:
-            print(f"❌ Lỗi ngoài dự kiến khi khởi chạy Bot: {e}")
+            print(f"❌ Lỗi khi khởi chạy Bot: {e}")
             await asyncio.sleep(30)
 
 if __name__ == "__main__":

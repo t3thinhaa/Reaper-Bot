@@ -1,59 +1,77 @@
-import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import logging
+from typing import AsyncGenerator
+from contextlib import asynccontextmanager
 
-# External URL mặc định cho Local Dev
-DEFAULT_LOCAL_URL = "postgresql://reaper_db_avmf_user:vNlx5ompEuSfkbUcoSeIFJxjuGqLnhLr@dpg-da20033ncjis73880o2g-a.oregon-postgres.render.com/reaper_db_avmf"
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, Integer, BigInteger, Text
 
-def get_db_connection():
-    # Ưu tiên lấy DATABASE_URL từ Render Environment, nếu không có mới dùng Local URL
-    url = os.getenv("DATABASE_URL", DEFAULT_LOCAL_URL)
-    
-    # Chuẩn hóa prefix từ postgres:// sang postgresql:// cho psycopg2
-    if url and url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-        
-    return psycopg2.connect(url)
+# Import chuỗi URL đã được chuẩn hoá từ config.py
+from config import DATABASE_URL
 
-def init_db():
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Database")
+
+# Cấu hình Engine & Connection Pool
+engine_args = {"echo": False}
+
+if "sqlite" not in DATABASE_URL:
+    engine_args.update({
+        "pool_size": 5,          # Tối đa 5 kết nối thường trực
+        "max_overflow": 10,      # Tối đa 10 kết nối tạm thời khi tải cao
+        "pool_recycle": 300,     # Reset kết nối sau 5 phút tránh bị rớt mạng ngầm
+        "pool_pre_ping": True    # Ping DB kiểm tra kết nối còn sống trước khi query
+    })
+
+engine = create_async_engine(DATABASE_URL, **engine_args)
+AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+# ORM Models (Giữ nguyên cấu trúc cũ)
+class Base(DeclarativeBase):
+    pass
+
+class UserPoint(Base):
+    __tablename__ = "users_points"
+
+    user_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(50), primary_key=True, default="0")
+    user_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    soul_points: Mapped[int] = mapped_column(Integer, default=0)
+    current_challenge: Mapped[str | None] = mapped_column(Text, default="None")
+    challenge_reward: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str | None] = mapped_column(String(20), default="IDLE")
+    bao_day: Mapped[int] = mapped_column(Integer, default=0)
+    bao_week: Mapped[int] = mapped_column(Integer, default=0)
+    bao_month: Mapped[int] = mapped_column(Integer, default=0)
+    is_sieu_cap: Mapped[int] = mapped_column(Integer, default=0)
+    time_archive: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+class GuildRole(Base):
+    __tablename__ = "guild_roles"
+
+    guild_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    role_day: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    role_week: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    role_month: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    role_sieu_cap: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    role_ba_chu: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+async def init_db():
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Bảng lưu thông tin user, điểm số, thử thách & báo thủ
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users_points (
-                user_id VARCHAR(50),
-                guild_id VARCHAR(50) DEFAULT '0',
-                user_name TEXT,
-                soul_points INT DEFAULT 0,
-                current_challenge TEXT DEFAULT 'None',
-                challenge_reward INT DEFAULT 0,
-                status VARCHAR(20) DEFAULT 'IDLE',
-                bao_day INT DEFAULT 0,
-                bao_week INT DEFAULT 0,
-                bao_month INT DEFAULT 0,
-                is_sieu_cap INT DEFAULT 0,
-                time_archive TEXT,
-                PRIMARY KEY (user_id, guild_id)
-            );
-        ''')
-        
-        # Bảng lưu config role báo thủ của từng Server
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS guild_roles (
-                guild_id VARCHAR(50) PRIMARY KEY,
-                role_day BIGINT,
-                role_week BIGINT,
-                role_month BIGINT,
-                role_sieu_cap BIGINT,
-                role_ba_chu BIGINT
-            );
-        ''')
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("✅ Đã kết nối và khởi tạo PostgreSQL thành công!")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("✅ Khởi tạo và kết nối Database thành công!")
     except Exception as e:
-        print(f"❌ Lỗi kết nối PostgreSQL: {e}")
+        logger.error(f"❌ Lỗi khởi tạo Database: {e}", exc_info=True)
+
+@asynccontextmanager
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    session = AsyncSessionFactory()
+    try:
+        yield session
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"❌ Lỗi trong phiên làm việc DB: {e}", exc_info=True)
+        raise
+    finally:
+        await session.close()
