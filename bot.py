@@ -55,16 +55,18 @@ class ReaperBot(commands.Bot):
                     except Exception as e:
                         print(f"❌ Lỗi khi nạp file {file}: {e}")
 
+        # --- BƯỚC 3: ĐỒNG BỘ SLASH COMMANDS GLOBAL ---
         print("Synchronizing application commands...")
         try:
+            # Xóa toàn bộ lệnh thừa ở cấp Guild nếu từng copy
             if GUILD_ID:
                 guild = discord.Object(id=GUILD_ID)
-                self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                print(f"Successfully synced {len(synced)} slash command(s) to Guild {GUILD_ID}.")
-            else:
-                synced = await self.tree.sync()
-                print(f"Successfully synced {len(synced)} global slash command(s).")
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+                
+            # Chỉ sync Global
+            synced = await self.tree.sync()
+            print(f"Successfully synced {len(synced)} global slash command(s).")
         except Exception as e:
             print(f"❌ Không thể đồng bộ lệnh: {e}")
 
