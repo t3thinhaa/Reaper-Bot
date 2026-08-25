@@ -1,131 +1,68 @@
-import os
-import sys
-import logging
-import threading
-import asyncio
+# cogs/pubg.py
 import discord
 from discord.ext import commands
-from flask import Flask
+from discord import app_commands
+import random
 
-# Import các biến cấu hình trung tâm
-from config import TOKEN, GUILD_ID, PORT
-from database import init_db
+from data.pubg_maps import MAPS_DATA 
 
-# Logging
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+# Tạo một Class View chứa nút bấm Reroll
+class RerollView(discord.ui.View):
+    def __init__(self, map_key: str, map_name: str):
+        super().__init__(timeout=60) # Nút bấm có hiệu lực trong 60 giây
+        self.map_key = map_key
+        self.map_name = map_name
 
-# Web Server Keep-Alive
-app = Flask('')
+    @discord.ui.button(label="Xa quá! Random lại phát", style=discord.ButtonStyle.danger, emoji="🔄")
+    async def reroll_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        locations = MAPS_DATA.get(self.map_key)
+        new_lucky_spot = random.choice(locations)
 
-@app.route('/')
-def home():
-    return "Bot is alive!", 200
-
-def run_flask():
-    try:
-        app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-    except Exception as e:
-        logging.error(f"❌ Lỗi khởi chạy Flask Web Server: {e}")
-
-# Bot Class
-class ReaperBot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
-        intents.guilds = True
-        intents.members = True
-        intents.message_content = True
-
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            help_command=None
+        # Cập nhật lại Embed cũ với địa điểm mới
+        embed = discord.Embed(
+            title="🪂 PUBG DROP LOCATION (ĐÃ RANDOM LẠI) 🪂",
+            description=f"Bản đồ đang chọn: **{self.map_name}**",
+            color=discord.Color.red()
         )
+        embed.add_field(name="Địa điểm nhảy mới:", value=f"🎯 **{new_lucky_spot}**", inline=False)
+        embed.set_footer(text="Lần này mà xa nữa thì do ăn ở nhé anh em!")
 
-    async def setup_hook(self):
-        # 1. KHỞI TẠO DATABASE
-        print("🟢 Đang kết nối và khởi tạo bảng trong Database...")
-        try:
-            await init_db()
-        except Exception as e:
-            print(f"❌ Lỗi khởi tạo Database: {e}")
+        # Edit lại tin nhắn cũ kèm theo nút bấm cũ luôn
+        await interaction.response.edit_message(embed=embed, view=self)
 
-        # 2. NẠP TOÀN BỘ COGS
-        if os.path.exists("./cogs"):
-            for file in os.listdir("./cogs"):
-                if file.endswith(".py") and file != "__init__.py":
-                    cog_name = f"cogs.{file[:-3]}"
-                    try:
-                        await self.load_extension(cog_name)
-                        print(f"✅ Loaded extension: {file}")
-                    except Exception as e:
-                        print(f"❌ Lỗi khi nạp file {file}: {e}")
-        else:
-            print("⚠️ Thư mục './cogs' không tồn tại, bỏ qua bước nạp Cogs.")
 
-        # 3. ĐỒNG BỘ SLASH COMMANDS (CHỐNG LẶP LỆNH TỐI ƯU)
-        print("🔄 Đang đồng bộ Slash Commands...")
-        try:
-            if GUILD_ID:
-                guild = discord.Object(id=GUILD_ID)
-                # Chỉ copy lệnh sang Guild cụ thể nếu chạy môi trường Dev/Test
-                self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                print(f"⚡ Đã đồng bộ {len(synced)} lệnh trực tiếp cho Guild ID: {GUILD_ID}")
-            else:
-                # Chế độ Production: Đồng bộ Global duy nhất
-                synced = await self.tree.sync()
-                print(f"🌐 Đã đồng bộ {len(synced)} lệnh Global toàn hệ thống.")
-        except discord.errors.HTTPException as e:
-            print(f"❌ Lỗi HTTP khi sync lệnh Discord (Có thể dính Rate Limit): {e}")
-        except Exception as e:
-            print(f"❌ Không thể đồng bộ lệnh Slash: {e}")
+class PUBG(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
 
-    async def on_ready(self):
-        print("=" * 40)
-        print(f"Logged in successfully as : {self.user}")
-        print(f"Bot Application ID        : {self.user.id}")
-        print(f"Discord.py Version        : {discord.__version__}")
-        print("=" * 40)
+    @app_commands.command(name="drop", description="Random địa điểm nhảy dù trong PUBG!")
+    @app_commands.choices(map_name=[
+        app_commands.Choice(name="Erangel", value="erangel"),
+        app_commands.Choice(name="Miramar", value="miramar"),
+        app_commands.Choice(name="Sanhok", value="sanhok"),
+        app_commands.Choice(name="Taego", value="taego"),
+        app_commands.Choice(name="Vikendi", value="vikendi"),
+        app_commands.Choice(name="Deston", value="deston"),
+        app_commands.Choice(name="Rondo", value="rondo"),
+    ])
+    async def drop(self, interaction: discord.Interaction, map_name: app_commands.Choice[str]):
+        selected_map_key = map_name.value
+        selected_map_name = map_name.name
         
-        try:
-            await self.change_presence(
-                activity=discord.Activity(type=discord.ActivityType.playing, name="PUBG Multiverse")
-            )
-        except Exception as e:
-            print(f"⚠️ Lỗi cập nhật trạng thái Bot: {e}")
+        locations = MAPS_DATA.get(selected_map_key)
+        lucky_spot = random.choice(locations)
+        
+        embed = discord.Embed(
+            title="🪂 PUBG DROP LOCATION 🪂",
+            description=f"Bản đồ đang chọn: **{selected_map_name}**",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Địa điểm nhảy đề xuất:", value=f"🎯 **{lucky_spot}**", inline=False)
+        embed.set_footer(text="Chúc anh em loot được nhiều đồ ngon và 'Chicken Dinner'!")
+        
+        # Thêm view chứa nút bấm vào tin nhắn gửi đi
+        view = RerollView(map_key=selected_map_key, map_name=selected_map_name)
+        await interaction.response.send_message(embed=embed, view=view)
 
-async def main():
-    if not TOKEN:
-        print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN!")
-        sys.exit(1)
-
-    # Khởi chạy Flask Thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    retry_delay = 300
-    while True:
-        bot = ReaperBot()
-        try:
-            await bot.start(TOKEN)
-        except discord.errors.HTTPException as e:
-            if e.status == 429:
-                print(f"⚠️ Rate Limit (429)! Tạm nghỉ {retry_delay // 60} phút...")
-                await asyncio.sleep(retry_delay)
-            else:
-                print(f"❌ Lỗi HTTP Discord: {e}")
-                await asyncio.sleep(30)
-        except discord.errors.LoginFailure:
-            print("❌ Token Discord không hợp lệ! Vui lòng kiểm tra lại DISCORD_TOKEN.")
-            break
-        except Exception as e:
-            print(f"❌ Lỗi ngoài dự kiến khi khởi chạy Bot: {e}")
-            await asyncio.sleep(30)
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nTắt Bot an toàn (Graceful Shutdown)...")
+async def setup(bot: commands.Bot):
+    await bot.add_cog(PUBG(bot))
