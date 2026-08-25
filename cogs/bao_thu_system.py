@@ -1,38 +1,26 @@
 import os
-import sqlite3
+import logging
 import asyncio
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timedelta, timezone
 
-# --- CẤU HÌNH MÚI GIỜ & PREFIX ---
+# 1. IMPORT CÁC THÀNH PHẦN ASYNC DATABASE VÀ ORM MODELS
+from database import get_session, UserPoint, GuildRole
+from sqlalchemy import select, update, delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+logger = logging.getLogger("BaoThuSystem")
+
 def get_vn_time():
+    """Lấy thời gian chuẩn múi giờ Việt Nam (UTC+7)"""
     return datetime.now(timezone(timedelta(hours=7)))
 
 PREFIX_DAY = "[🎭 Vía Nặng] "
 PREFIX_WEEK = "[🌪️ Quả Báo Tới] "
 PREFIX_MONTH = "[💀 Họa Thần] "
 ALL_PREFIXES = [PREFIX_DAY, PREFIX_WEEK, PREFIX_MONTH, "🔱 ", " (Ách Vương Đế Tôn)", " (Siêu Báo)"]
-
-DB_PATH = "reaper_data.db"
-
-# --- HELPER DATABASE (SQLITE) ---
-def execute_query(query, params=(), fetchone=False, fetchall=False, commit=False):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    
-    data = None
-    if fetchone:
-        data = cursor.fetchone()
-    elif fetchall:
-        data = cursor.fetchall()
-        
-    if commit:
-        conn.commit()
-    conn.close()
-    return data
 
 # =========================================================
 # 1. BÌNH CHỌN LUẬN TỘI (VOTE BÁO THỦ)
@@ -48,27 +36,30 @@ class IndividualVoteButton(discord.ui.Button):
         self.target_id = member_id
 
     async def callback(self, interaction: discord.Interaction):
-        view: ActiveVoteView = self.view
-        voter_id = interaction.user.id
+        try:
+            view: ActiveVoteView = self.view
+            voter_id = interaction.user.id
 
-        if voter_id in view.votes:
-            if view.votes[voter_id] == self.target_id:
-                del view.votes[voter_id]
-                await interaction.response.send_message("🔄 Bạn đã rút lại phiếu bầu!", ephemeral=True)
+            if voter_id in view.votes:
+                if view.votes[voter_id] == self.target_id:
+                    del view.votes[voter_id]
+                    await interaction.response.send_message("🔄 Bạn đã rút lại phiếu bầu!", ephemeral=True)
+                else:
+                    view.votes[voter_id] = self.target_id
+                    await interaction.response.send_message("🔄 Bạn đã đổi ý sang bầu cho tội đồ này!", ephemeral=True)
             else:
                 view.votes[voter_id] = self.target_id
-                await interaction.response.send_message("🔄 Bạn đã đổi ý sang bầu cho tội đồ này!", ephemeral=True)
-        else:
-            view.votes[voter_id] = self.target_id
-            await interaction.response.send_message("✅ Đã ghi nhận phiếu bầu ẩn danh của bạn!", ephemeral=True)
+                await interaction.response.send_message("✅ Đã ghi nhận phiếu bầu ẩn danh của bạn!", ephemeral=True)
 
-        target_member = interaction.guild.get_member(self.target_id) or await interaction.guild.fetch_member(self.target_id)
-        if target_member:
-            await interaction.channel.send(
-                f"📢 Một ai đó đã bỏ phiếu luận tội cho **{target_member.display_name}**!", 
-                delete_after=4
-            )
-        await view.update_embed(interaction)
+            target_member = interaction.guild.get_member(self.target_id) or await interaction.guild.fetch_member(self.target_id)
+            if target_member and interaction.channel:
+                await interaction.channel.send(
+                    f"📢 Một ai đó đã bỏ phiếu luận tội cho **{target_member.display_name}**!", 
+                    delete_after=4
+                )
+            await view.update_embed(interaction)
+        except Exception as e:
+            logger.error(f"[VoteButton] Lỗi callback vote: {e}")
 
 
 class ActiveVoteView(discord.ui.View):
@@ -87,7 +78,8 @@ class ActiveVoteView(discord.ui.View):
         try:
             vote_counts = {t[0]: 0 for t in self.targets}
             for t_id in self.votes.values():
-                if t_id in vote_counts: vote_counts[t_id] += 1
+                if t_id in vote_counts: 
+                    vote_counts[t_id] += 1
 
             embed = interaction.message.embeds[0]
             new_desc = "🚨 **DANH SÁCH TỘI ĐỒ ĐANG LÊN THỚT LUẬN TỘI:**\n\n"
@@ -100,7 +92,7 @@ class ActiveVoteView(discord.ui.View):
             embed.description = new_desc
             await interaction.message.edit(embed=embed, view=self)
         except Exception as e:
-            print(f"[BaoThu] Lỗi cập nhật Embed: {e}")
+            logger.error(f"[ActiveVoteView] Lỗi cập nhật Embed: {e}")
 
     @discord.ui.button(label="🔨 Chốt Sổ Phiên Tòa", style=discord.ButtonStyle.success, custom_id="admin_chot_so_btn", row=1)
     async def admin_chot_so(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -116,12 +108,15 @@ class ActiveVoteView(discord.ui.View):
 
     async def process_results(self):
         try:
-            for item in self.children: item.disabled = True
-            if not self.msg: return
+            for item in self.children: 
+                item.disabled = True
+            if not self.msg: 
+                return
 
             vote_counts = {t[0]: 0 for t in self.targets}
             for t_id in self.votes.values():
-                if t_id in vote_counts: vote_counts[t_id] += 1
+                if t_id in vote_counts: 
+                    vote_counts[t_id] += 1
 
             max_votes = max(vote_counts.values()) if vote_counts else 0
             if max_votes == 0:
@@ -134,42 +129,56 @@ class ActiveVoteView(discord.ui.View):
 
             guild = self.msg.guild
             roles_cfg = await self.cog_ref.get_guild_roles(guild.id)
-            day_role = guild.get_role(roles_cfg.get("day"))
-            ba_chu_role = guild.get_role(roles_cfg.get("ba_chu"))
+            day_role = guild.get_role(roles_cfg.get("day")) if roles_cfg.get("day") else None
+            ba_chu_role = guild.get_role(roles_cfg.get("ba_chu")) if roles_cfg.get("ba_chu") else None
 
-            for w_id in winners:
-                member = guild.get_member(w_id) or await guild.fetch_member(w_id)
-                if member:
-                    try:
-                        execute_query('''
-                            INSERT INTO users_points (user_id, guild_id, bao_day, bao_week, bao_month)
-                            VALUES (%s, %s, 1, 1, 1)
-                            ON CONFLICT(user_id, guild_id) DO UPDATE SET
-                                bao_day = users_points.bao_day + 1,
-                                bao_week = users_points.bao_week + 1,
-                                bao_month = users_points.bao_month + 1;
-                        ''', (str(w_id), str(guild.id)), commit=True)
+            # Xử lý thi hành án với SQLAlchemy Async
+            async with get_session() as session:
+                async with session.begin():
+                    for w_id in winners:
+                        member = guild.get_member(w_id) or await guild.fetch_member(w_id)
+                        if member:
+                            try:
+                                # Upsert điểm cộng theo phong cách PostgreSQL SQLAlchemy
+                                stmt = pg_insert(UserPoint).values(
+                                    user_id=str(w_id),
+                                    guild_id=str(guild.id),
+                                    user_name=member.name,
+                                    bao_day=1,
+                                    bao_week=1,
+                                    bao_month=1
+                                ).on_conflict_do_update(
+                                    index_elements=['user_id', 'guild_id'],
+                                    set_={
+                                        'bao_day': UserPoint.bao_day + 1,
+                                        'bao_week': UserPoint.bao_week + 1,
+                                        'bao_month': UserPoint.bao_month + 1,
+                                        'user_name': member.name
+                                    }
+                                )
+                                await session.execute(stmt)
 
-                        result_text += f"💥 {member.mention} gánh trọn `{max_votes}` phiếu phạt! Nhận `+1 Điểm Báo`.\n"
-                        
-                        if day_role:
-                            await member.add_roles(day_role)
-                        
-                        has_ba_chu = ba_chu_role in member.roles if ba_chu_role else False
-                        if not has_ba_chu:
-                            clean_name = member.display_name
-                            for p in ALL_PREFIXES: clean_name = clean_name.replace(p, "")
-                            new_nick = f"{PREFIX_DAY}{clean_name.strip()}"[:32]
-                            await member.edit(nick=new_nick)
-                            result_text += f"➡️ Đã áp chế biệt danh: `{new_nick}`\n\n"
+                                result_text += f"💥 {member.mention} gánh trọn `{max_votes}` phiếu phạt! Nhận `+1 Điểm Báo`.\n"
+                                
+                                if day_role:
+                                    await member.add_roles(day_role)
+                                
+                                has_ba_chu = (ba_chu_role in member.roles) if ba_chu_role else False
+                                if not has_ba_chu:
+                                    clean_name = member.display_name
+                                    for p in ALL_PREFIXES: 
+                                        clean_name = clean_name.replace(p, "")
+                                    new_nick = f"{PREFIX_DAY}{clean_name.strip()}"[:32]
+                                    await member.edit(nick=new_nick)
+                                    result_text += f"➡️ Đã áp chế biệt danh: `{new_nick}`\n\n"
 
-                    except Exception as err:
-                        print(f"[BaoThu] Lỗi thi hành phán quyết cho {w_id}: {err}")
+                            except Exception as err:
+                                logger.error(f"[BaoThu] Lỗi thi hành phán quyết cho {w_id}: {err}")
 
             embed = discord.Embed(title="🔨 PHIÊN TÒA KHÉP LẠI - THI HÀNH ÁN THÀNH CÔNG", description=result_text, color=discord.Color.dark_purple())
             await self.msg.edit(embed=embed, view=self.parent_view)
         except Exception as e:
-            print(f"[BaoThu] Lỗi xử lý kết quả: {e}")
+            logger.error(f"[BaoThu] Lỗi xử lý kết quả phiên tòa: {e}")
 
 
 class CustomStringSelect(discord.ui.Select):
@@ -355,9 +364,9 @@ class RemoveVoteView(discord.ui.View):
         if yes_len > no_len and yes_len > 0:
             roles_cfg = await self.cog_ref.get_guild_roles(guild.id)
             roles_to_remove = [
-                guild.get_role(roles_cfg.get("day")),
-                guild.get_role(roles_cfg.get("week")),
-                guild.get_role(roles_cfg.get("month"))
+                guild.get_role(roles_cfg.get("day")) if roles_cfg.get("day") else None,
+                guild.get_role(roles_cfg.get("week")) if roles_cfg.get("week") else None,
+                guild.get_role(roles_cfg.get("month")) if roles_cfg.get("month") else None
             ]
             
             removed_roles_names = []
@@ -367,7 +376,7 @@ class RemoveVoteView(discord.ui.View):
                         await self.target.remove_roles(r)
                         removed_roles_names.append(r.name)
                     except Exception as err:
-                        print(f"[BaoThu] Lỗi xoá role: {err}")
+                        logger.error(f"[BaoThu] Lỗi xoá role: {err}")
 
             try:
                 clean_nick = self.target.display_name
@@ -377,14 +386,21 @@ class RemoveVoteView(discord.ui.View):
                 final_nick = None if clean_nick.strip() == self.target.name else clean_nick.strip()
                 await self.target.edit(nick=final_nick)
             except Exception as e:
-                print(f"[BaoThu] Lỗi sửa Nickname: {e}")
+                logger.error(f"[BaoThu] Lỗi sửa Nickname: {e}")
 
-            execute_query('''
-                INSERT INTO users_points (user_id, guild_id, bao_day, bao_week, bao_month)
-                VALUES (%s, %s, 0, 0, 0)
-                ON CONFLICT(user_id, guild_id) DO UPDATE SET
-                    bao_day = 0, bao_week = 0, bao_month = 0;
-            ''', (str(self.target.id), str(guild.id)), commit=True)
+            # Reset điểm báo về 0 bằng Async SQLAlchemy
+            async with get_session() as session:
+                async with session.begin():
+                    stmt = pg_insert(UserPoint).values(
+                        user_id=str(self.target.id),
+                        guild_id=str(guild.id),
+                        user_name=self.target.name,
+                        bao_day=0, bao_week=0, bao_month=0
+                    ).on_conflict_do_update(
+                        index_elements=['user_id', 'guild_id'],
+                        set_={'bao_day': 0, 'bao_week': 0, 'bao_month': 0}
+                    )
+                    await session.execute(stmt)
 
             result_embed = discord.Embed(
                 title="🎉 PHÁN QUYẾT: ĐÃ ĐƯỢC ÂN XÁ thành công!",
@@ -421,22 +437,32 @@ class BaoThuSystem(commands.Cog):
         try:
             self.check_cycles.start()
         except Exception as e:
-            print(f"[BaoThu] Lỗi khởi động loop: {e}")
+            logger.error(f"[BaoThu] Lỗi khởi động loop: {e}")
 
     def cog_unload(self):
         self.check_cycles.cancel()
 
-    async def get_guild_roles(self, guild_id: int):
-        row = execute_query('SELECT role_day, role_week, role_month, role_sieu_cap, role_ba_chu FROM guild_roles WHERE guild_id = %s', (str(guild_id),), fetchone=True)
-        if not row:
+    async def get_guild_roles(self, guild_id: int) -> dict:
+        """Lấy danh sách ID Role Báo Thủ cấu hình cho Server từ DB Async"""
+        try:
+            async with get_session() as session:
+                stmt = select(GuildRole).where(GuildRole.guild_id == str(guild_id))
+                result = await session.execute(stmt)
+                role_config = result.scalar_one_or_none()
+
+                if not role_config:
+                    return {"ba_chu": None, "sieu_cap": None, "month": None, "week": None, "day": None}
+
+                return {
+                    "day": int(role_config.role_day) if role_config.role_day else None,
+                    "week": int(role_config.role_week) if role_config.role_week else None,
+                    "month": int(role_config.role_month) if role_config.role_month else None,
+                    "sieu_cap": int(role_config.role_sieu_cap) if role_config.role_sieu_cap else None,
+                    "ba_chu": int(role_config.role_ba_chu) if role_config.role_ba_chu else None
+                }
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi lấy cấu hình Guild Roles: {e}")
             return {"ba_chu": None, "sieu_cap": None, "month": None, "week": None, "day": None}
-        return {
-            "day": row[0],
-            "week": row[1],
-            "month": row[2],
-            "sieu_cap": row[3],
-            "ba_chu": row[4]
-        }
 
     @app_commands.command(name="config_baothu_roles", description="[Admin] Cấu hình các Role Báo Thủ cho Server")
     async def config_baothu_roles(
@@ -451,21 +477,32 @@ class BaoThuSystem(commands.Cog):
             await interaction.response.send_message("❌ Bạn không có quyền!", ephemeral=True)
             return
 
-        execute_query('''
-            INSERT INTO guild_roles (guild_id, role_day, role_week, role_month, role_sieu_cap, role_ba_chu)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT(guild_id) DO UPDATE SET
-                role_day = EXCLUDED.role_day,
-                role_week = EXCLUDED.role_week,
-                role_month = EXCLUDED.role_month,
-                role_sieu_cap = EXCLUDED.role_sieu_cap,
-                role_ba_chu = EXCLUDED.role_ba_chu;
-        ''', (
-            str(interaction.guild_id), role_day.id, role_week.id, role_month.id, role_sieu_cap.id,
-            role_ba_chu.id if role_ba_chu else None
-        ), commit=True)
+        try:
+            async with get_session() as session:
+                async with session.begin():
+                    stmt = pg_insert(GuildRole).values(
+                        guild_id=str(interaction.guild_id),
+                        role_day=str(role_day.id),
+                        role_week=str(role_week.id),
+                        role_month=str(role_month.id),
+                        role_sieu_cap=str(role_sieu_cap.id),
+                        role_ba_chu=str(role_ba_chu.id) if role_ba_chu else None
+                    ).on_conflict_do_update(
+                        index_elements=['guild_id'],
+                        set_={
+                            'role_day': str(role_day.id),
+                            'role_week': str(role_week.id),
+                            'role_month': str(role_month.id),
+                            'role_sieu_cap': str(role_sieu_cap.id),
+                            'role_ba_chu': str(role_ba_chu.id) if role_ba_chu else None
+                        }
+                    )
+                    await session.execute(stmt)
 
-        await interaction.response.send_message("✅ Đã cập nhật thành công ID Role Báo Thủ vào PostgreSQL!", ephemeral=True)
+            await interaction.response.send_message("✅ Đã cập nhật thành công ID Role Báo Thủ vào PostgreSQL!", ephemeral=True)
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi cấu hình Role: {e}")
+            await interaction.response.send_message(f"❌ Lỗi lưu cấu hình: {e}", ephemeral=True)
 
     @app_commands.command(name="setup_vote_bao", description="Tạo bảng cài đặt bầu chọn Báo Thủ cố định (Ẩn danh 100%)")
     async def setup_vote_bao(self, interaction: discord.Interaction):
@@ -507,15 +544,15 @@ class BaoThuSystem(commands.Cog):
             await interaction.followup.send("✅ Khởi tạo hệ thống thành công!", ephemeral=True)
 
         except Exception as e:
-            print(f"[BaoThu] Lỗi setup: {e}")
+            logger.error(f"[BaoThu] Lỗi setup: {e}")
             await interaction.followup.send(f"❌ Có lỗi xảy ra: {e}", ephemeral=True)
 
     @app_commands.command(name="vote_remove_bt", description="Mở phiên tòa bỏ phiếu công khai để gỡ danh hiệu Báo Thủ cho thành viên")
     async def vote_remove_bt(self, interaction: discord.Interaction, target: discord.Member):
         roles_cfg = await self.get_guild_roles(interaction.guild_id)
-        day_role = interaction.guild.get_role(roles_cfg.get("day"))
-        week_role = interaction.guild.get_role(roles_cfg.get("week"))
-        month_role = interaction.guild.get_role(roles_cfg.get("month"))
+        day_role = interaction.guild.get_role(roles_cfg.get("day")) if roles_cfg.get("day") else None
+        week_role = interaction.guild.get_role(roles_cfg.get("week")) if roles_cfg.get("week") else None
+        month_role = interaction.guild.get_role(roles_cfg.get("month")) if roles_cfg.get("month") else None
 
         has_bt_role = any([
             day_role and day_role in target.roles,
@@ -555,20 +592,28 @@ class BaoThuSystem(commands.Cog):
 
         cfg = config_map[loai]
         role = guild.get_role(cfg["role_id"]) if cfg["role_id"] else None
-        ba_chu_role = guild.get_role(roles_cfg.get("ba_chu"))
+        ba_chu_role = guild.get_role(roles_cfg.get("ba_chu")) if roles_cfg.get("ba_chu") else None
 
         try:
-            col_name = cfg["col"]
-            execute_query(f'''
-                INSERT INTO users_points (user_id, guild_id, {col_name})
-                VALUES (%s, %s, 1)
-                ON CONFLICT(user_id, guild_id) DO UPDATE SET
-                    {col_name} = users_points.{col_name} + 1;
-            ''', (str(target.id), str(guild.id)), commit=True)
+            async with get_session() as session:
+                async with session.begin():
+                    # Lấy dữ liệu user
+                    stmt = select(UserPoint).where(UserPoint.user_id == str(target.id), UserPoint.guild_id == str(guild.id))
+                    res = await session.execute(stmt)
+                    u_data = res.scalar_one_or_none()
 
-            if role: await target.add_roles(role)
+                    if not u_data:
+                        u_data = UserPoint(user_id=str(target.id), guild_id=str(guild.id), user_name=target.name)
+                        session.add(u_data)
 
-            has_ba_chu = ba_chu_role in target.roles if ba_chu_role else False
+                    if loai == "day": u_data.bao_day += 1
+                    elif loai == "week": u_data.bao_week += 1
+                    elif loai == "month": u_data.bao_month += 1
+
+            if role: 
+                await target.add_roles(role)
+
+            has_ba_chu = (ba_chu_role in target.roles) if ba_chu_role else False
             if not has_ba_chu:
                 clean_name = target.display_name
                 for p in ALL_PREFIXES: clean_name = clean_name.replace(p, "")
@@ -584,6 +629,7 @@ class BaoThuSystem(commands.Cog):
             await interaction.followup.send(f"✅ Đã áp chế {target.mention} thành **{cfg['title']}**!", ephemeral=True)
 
         except Exception as e:
+            logger.error(f"[BaoThu] Lỗi pickbaothu: {e}")
             await interaction.followup.send(f"❌ Xảy ra lỗi: {e}", ephemeral=True)
 
     @app_commands.command(name="manage_points", description="[Admin] Chỉnh sửa điểm Báo Thủ của thành viên")
@@ -605,21 +651,30 @@ class BaoThuSystem(commands.Cog):
         u_id = str(target.id)
         g_id = str(interaction.guild_id)
 
-        if thao_tac == "reset":
-            execute_query(f'''
-                INSERT INTO users_points (user_id, guild_id, {loai})
-                VALUES (%s, %s, 0)
-                ON CONFLICT(user_id, guild_id) DO UPDATE SET {loai} = 0;
-            ''', (u_id, g_id), commit=True)
-            await interaction.response.send_message(f"✅ Đã Reset thành công `{loai}` của {target.mention} về 0!")
-        else:
-            val = diem if thao_tac == "add" else -diem
-            execute_query(f'''
-                INSERT INTO users_points (user_id, guild_id, {loai})
-                VALUES (%s, %s, %s)
-                ON CONFLICT(user_id, guild_id) DO UPDATE SET {loai} = users_points.{loai} + %s;
-            ''', (u_id, g_id, val, val), commit=True)
-            await interaction.response.send_message(f"✅ Đã điều chỉnh `{loai}` cho {target.mention} số lượng: `{val}` điểm!")
+        try:
+            async with get_session() as session:
+                async with session.begin():
+                    stmt = select(UserPoint).where(UserPoint.user_id == u_id, UserPoint.guild_id == g_id)
+                    res = await session.execute(stmt)
+                    u_data = res.scalar_one_or_none()
+
+                    if not u_data:
+                        u_data = UserPoint(user_id=u_id, guild_id=g_id, user_name=target.name)
+                        session.add(u_data)
+
+                    if thao_tac == "reset":
+                        setattr(u_data, loai, 0)
+                        msg = f"✅ Đã Reset thành công `{loai}` của {target.mention} về 0!"
+                    else:
+                        val = diem if thao_tac == "add" else -diem
+                        curr = getattr(u_data, loai, 0)
+                        setattr(u_data, loai, max(0, curr + val))
+                        msg = f"✅ Đã điều chỉnh `{loai}` cho {target.mention} số lượng: `{val}` điểm!"
+
+            await interaction.response.send_message(msg)
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi manage_points: {e}")
+            await interaction.response.send_message(f"❌ Không thể thay đổi điểm: {e}", ephemeral=True)
 
     @tasks.loop(minutes=5)
     async def check_cycles(self):
@@ -627,6 +682,7 @@ class BaoThuSystem(commands.Cog):
             now_vn = get_vn_time()
             current_date_str = now_vn.strftime("%Y-%m-%d")
 
+            # Chạy tự động vào lúc 5h sáng hàng ngày
             if now_vn.hour == 5 and self.last_checked_date != current_date_str:
                 for guild in self.bot.guilds:
                     roles_cfg = await self.get_guild_roles(guild.id)
@@ -641,67 +697,92 @@ class BaoThuSystem(commands.Cog):
 
                 self.last_checked_date = current_date_str
         except Exception as loop_err:
-            print(f"[BaoThu] Lỗi task loop: {loop_err}")
+            logger.error(f"[BaoThu] Lỗi task loop: {loop_err}")
 
     async def clear_all_day_titles(self, guild, day_role_id):
-        if not day_role_id: return
-        day_role = guild.get_role(day_role_id)
-        if day_role:
-            for member in day_role.members:
-                try:
-                    await member.remove_roles(day_role)
-                    new_nick = member.display_name
-                    for p in ALL_PREFIXES: new_nick = new_nick.replace(p, "")
-                    await member.edit(nick=None if new_nick.strip() == member.name else new_nick.strip())
-                except: pass
-        execute_query('UPDATE users_points SET bao_day = 0 WHERE guild_id = %s;', (str(guild.id),), commit=True)
+        if day_role_id:
+            day_role = guild.get_role(day_role_id)
+            if day_role:
+                for member in day_role.members:
+                    try:
+                        await member.remove_roles(day_role)
+                        new_nick = member.display_name
+                        for p in ALL_PREFIXES: new_nick = new_nick.replace(p, "")
+                        await member.edit(nick=None if new_nick.strip() == member.name else new_nick.strip())
+                    except Exception as e:
+                        logger.error(f"[BaoThu] Lỗi xoá role day cho {member.id}: {e}")
+
+        # Reset điểm bao_day toàn bộ guild về 0
+        try:
+            async with get_session() as session:
+                async with session.begin():
+                    stmt = update(UserPoint).where(UserPoint.guild_id == str(guild.id)).values(bao_day=0)
+                    await session.execute(stmt)
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi reset điểm ngày: {e}")
 
     async def reward_top_role(self, guild, mode: str, role_id: int, role_title: str, prefix_string: str):
         if not role_id: return
         role = guild.get_role(role_id)
         if not role: return
 
-        db_field = f"bao_{mode}"
-        top_user = execute_query(f'SELECT user_id, {db_field} FROM users_points WHERE guild_id = %s ORDER BY {db_field} DESC LIMIT 1', (str(guild.id),), fetchone=True)
-        
-        if not top_user or top_user[1] == 0: 
-            execute_query(f'UPDATE users_points SET {db_field} = 0 WHERE guild_id = %s;', (str(guild.id),), commit=True)
-            return
+        try:
+            async with get_session() as session:
+                # Tìm Top 1 Báo Thủ
+                attr = getattr(UserPoint, f"bao_{mode}")
+                stmt = select(UserPoint).where(UserPoint.guild_id == str(guild.id)).order_by(attr.desc()).limit(1)
+                res = await session.execute(stmt)
+                top_user = res.scalar_one_or_none()
 
-        top_id = int(top_user[0])
-        winner = guild.get_member(top_id) or await guild.fetch_member(top_id)
-        
-        if winner:
-            try:
-                await winner.add_roles(role)
-                clean_name = winner.display_name
-                for p in ALL_PREFIXES: clean_name = clean_name.replace(p, "")
-                await winner.edit(nick=f"{prefix_string}{clean_name.strip()}"[:32])
-            except: pass
+                if top_user and getattr(top_user, f"bao_{mode}") > 0:
+                    winner = guild.get_member(int(top_user.user_id)) or await guild.fetch_member(int(top_user.user_id))
+                    if winner:
+                        try:
+                            await winner.add_roles(role)
+                            clean_name = winner.display_name
+                            for p in ALL_PREFIXES: clean_name = clean_name.replace(p, "")
+                            await winner.edit(nick=f"{prefix_string}{clean_name.strip()}"[:32])
+                        except Exception as err:
+                            logger.error(f"[BaoThu] Lỗi trao role cho Top 1: {err}")
 
-        execute_query(f'UPDATE users_points SET {db_field} = 0 WHERE guild_id = %s;', (str(guild.id),), commit=True)
+                # Reset điểm chu kỳ (Tuần/Tháng)
+                async with session.begin():
+                    stmt_reset = update(UserPoint).where(UserPoint.guild_id == str(guild.id)).values(**{f"bao_{mode}": 0})
+                    await session.execute(stmt_reset)
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi reward_top_role ({mode}): {e}")
 
     async def process_sieu_cap_bao_thu(self, guild, sieu_cap_role_id, ba_chu_role_id):
         if not sieu_cap_role_id: return
-        top_user = execute_query('SELECT user_id, bao_month FROM users_points WHERE guild_id = %s ORDER BY bao_month DESC LIMIT 1', (str(guild.id),), fetchone=True)
-        if not top_user or top_user[1] == 0: return
-
-        user_id = top_user[0]
-        role_sieu_cap = guild.get_role(sieu_cap_role_id)
         
-        current_date_str = get_vn_time().strftime("%d/%m/%Y")
-        execute_query('''
-            UPDATE users_points SET is_sieu_cap = 1, time_archive = %s WHERE user_id = %s AND guild_id = %s;
-        ''', (current_date_str, str(user_id), str(guild.id)), commit=True)
+        try:
+            async with get_session() as session:
+                stmt = select(UserPoint).where(UserPoint.guild_id == str(guild.id)).order_by(UserPoint.bao_month.desc()).limit(1)
+                res = await session.execute(stmt)
+                top_user = res.scalar_one_or_none()
 
-        member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
-        if member and role_sieu_cap:
-            try:
-                await member.add_roles(role_sieu_cap)
-                pure_name = member.display_name
-                for p in ALL_PREFIXES: pure_name = pure_name.replace(p, "")
-                await member.edit(nick=f"🔱 {pure_name.strip()[:18]} (Siêu Báo)")
-            except: pass
+                if not top_user or top_user.bao_month == 0: 
+                    return
+
+                user_id = top_user.user_id
+                role_sieu_cap = guild.get_role(sieu_cap_role_id)
+                current_date_str = get_vn_time().strftime("%d/%m/%Y")
+
+                async with session.begin():
+                    top_user.is_sieu_cap = 1
+                    top_user.time_archive = current_date_str
+
+                member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
+                if member and role_sieu_cap:
+                    try:
+                        await member.add_roles(role_sieu_cap)
+                        pure_name = member.display_name
+                        for p in ALL_PREFIXES: pure_name = pure_name.replace(p, "")
+                        await member.edit(nick=f"🔱 {pure_name.strip()[:18]} (Siêu Báo)")
+                    except Exception as err:
+                        logger.error(f"[BaoThu] Lỗi trao Siêu Báo Thủ: {err}")
+        except Exception as e:
+            logger.error(f"[BaoThu] Lỗi process_sieu_cap_bao_thu: {e}")
 
 
 async def setup(bot):
