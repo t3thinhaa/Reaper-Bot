@@ -1,13 +1,18 @@
-import os
+from __future__ import annotations
+
 import json
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from database import get_db_connection
+
+from sqlalchemy import select, update
+from database import get_session, UserPoint
 
 CHALLENGES_FILE = "./data/challenges.json"
 
-def load_challenges_from_file():
+def load_challenges_from_file() -> list[dict]:
+    """Đọc danh sách thử thách từ file JSON."""
     if not os.path.exists(CHALLENGES_FILE):
         return []
     try:
@@ -18,12 +23,12 @@ def load_challenges_from_file():
         return []
 
 class ChallengeControlView(discord.ui.View):
-    def __init__(self, current_challenge_idx=0):
+    def __init__(self, current_challenge_idx: int = 0):
         super().__init__(timeout=None)
         self.challenges = load_challenges_from_file()
         self.idx = current_challenge_idx if self.challenges else 0
 
-    def get_current_embed(self):
+    def get_current_embed(self) -> discord.Embed:
         if not self.challenges:
             return discord.Embed(
                 title="❌ Hệ Thống Trống", 
@@ -47,9 +52,11 @@ class ChallengeControlView(discord.ui.View):
 
     @discord.ui.button(label="🎲 Đổi Thử Thách", style=discord.ButtonStyle.secondary, custom_id="btn_next_challenge")
     async def next_challenge(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        
         self.challenges = load_challenges_from_file()
         if not self.challenges:
-            return await interaction.response.send_message("❌ File JSON trống hoặc lỗi cấu trúc!", ephemeral=True)
+            return await interaction.followup.send("❌ File JSON trống hoặc lỗi cấu trúc!", ephemeral=True)
             
         self.idx += 1
         embed = self.get_current_embed()
@@ -59,8 +66,6 @@ class ChallengeControlView(discord.ui.View):
             await interaction.message.edit(embed=embed, attachments=[file])
         else:
             await interaction.message.edit(embed=embed, attachments=[])
-            
-        await interaction.response.defer()
 
     @discord.ui.button(label="✅ Nhận Kèo", style=discord.ButtonStyle.success, custom_id="btn_accept_challenge")
     async def accept_challenge(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -74,20 +79,29 @@ class ChallengeControlView(discord.ui.View):
         reward = c.get('reward', 0)
         
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO users_points (user_id, guild_id, user_name, current_challenge, challenge_reward, status)
-                VALUES (%s, %s, %s, %s, %s, 'DOING')
-                ON CONFLICT (user_id, guild_id) DO UPDATE SET
-                    user_name = EXCLUDED.user_name,
-                    current_challenge = EXCLUDED.current_challenge,
-                    challenge_reward = EXCLUDED.challenge_reward,
-                    status = 'DOING';
-            ''', (user_id, guild_id, interaction.user.name, title, reward))
-            conn.commit()
-            cursor.close()
-            conn.close()
+            async with get_session() as session:
+                result = await session.execute(
+                    select(UserPoint).where(UserPoint.user_id == user_id, UserPoint.guild_id == guild_id)
+                )
+                user_db = result.scalar_one_or_none()
+
+                if user_db:
+                    user_db.user_name = interaction.user.name
+                    user_db.current_challenge = title
+                    user_db.challenge_reward = reward
+                    user_db.status = 'DOING'
+                else:
+                    new_user = UserPoint(
+                        user_id=user_id,
+                        guild_id=guild_id,
+                        user_name=interaction.user.name,
+                        current_challenge=title,
+                        challenge_reward=reward,
+                        status='DOING'
+                    )
+                    session.add(new_user)
+
+                await session.commit()
 
             await interaction.response.send_message(f"⚔️ Bạn đã nhận thử thách: **{title}**. Hệ thống đã ghi nhận!", ephemeral=True)
         except Exception as e:
@@ -99,30 +113,24 @@ class ChallengeControlView(discord.ui.View):
         guild_id = str(interaction.guild_id)
         
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute('SELECT current_challenge, challenge_reward, status FROM users_points WHERE user_id = %s AND guild_id = %s', (user_id, guild_id))
-            user_data = cursor.fetchone()
+            async with get_session() as session:
+                result = await session.execute(
+                    select(UserPoint).where(UserPoint.user_id == user_id, UserPoint.guild_id == guild_id)
+                )
+                user_db = result.scalar_one_or_none()
 
-            if not user_data or user_data[2] != "DOING" or user_data[0] == "None":
-                cursor.close()
-                conn.close()
-                return await interaction.response.send_message("❌ Bạn chưa bấm nhận thử thách nào!", ephemeral=True)
+                if not user_db or user_db.status != "DOING" or user_db.current_challenge == "None":
+                    return await interaction.response.send_message("❌ Bạn chưa bấm nhận thử thách nào!", ephemeral=True)
 
-            challenge_title = user_data[0]
-            reward = user_data[1]
+                challenge_title = user_db.current_challenge
+                reward = user_db.challenge_reward
 
-            cursor.execute('''
-                UPDATE users_points
-                SET status = 'DONE',
-                    current_challenge = 'None',
-                    challenge_reward = 0,
-                    soul_points = soul_points + %s
-                WHERE user_id = %s AND guild_id = %s;
-            ''', (reward, user_id, guild_id))
-            conn.commit()
-            cursor.close()
-            conn.close()
+                user_db.status = 'DONE'
+                user_db.current_challenge = 'None'
+                user_db.challenge_reward = 0
+                user_db.soul_points = (user_db.soul_points or 0) + reward
+
+                await session.commit()
 
             await interaction.response.send_message(f"🎉 Hệ thống tự động cộng **`+{reward}`** Điểm Linh Hồn vào ví của bạn!", ephemeral=True)
             await interaction.channel.send(
@@ -142,7 +150,7 @@ class ChallengeCog(commands.Cog):
         view = ChallengeControlView()
         embed = view.get_current_embed()
         
-        await interaction.response.send_message("⚙️ Đang tải lên thử thách", ephemeral=True)
+        await interaction.response.send_message("⚙️ Đang tải lên thử thách...", ephemeral=True)
         
         if os.path.exists("./data/images/ReaperChallenge.png"):
             file = discord.File("./data/images/ReaperChallenge.png", filename="ReaperChallenge.png")
